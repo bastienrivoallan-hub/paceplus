@@ -7,6 +7,7 @@ import * as Location from "expo-location";
 
 import { api } from "@/src/api";
 import { AppText, Card, Logo, PaceButton, ProgressRing, WorkoutBadge } from "@/src/components/ui";
+import RaceWeatherCard from "@/src/components/RaceWeatherCard";
 import { colors, fonts, radius, spacing, workoutMeta } from "@/src/theme";
 
 function scoreColor(s: number) {
@@ -157,6 +158,9 @@ export default function HomeScreen() {
             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </Pressable>
         ) : null}
+
+        {/* Race weather alert */}
+        <RaceWeatherCard />
 
         {/* Form of the day */}
         {form && (

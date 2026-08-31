@@ -60,3 +60,9 @@ Build a mobile Running Coach app from a Figma mockup ("PACE"). Dark/minimal desi
 ## Notes
 - GPS tracking requires a real device build to fully validate (limited in Expo Go / web preview).
 - 5-tab navigation is intentional per the provided mockup.
+
+## Iteration 4 — Circuits météo IA + Alerte météo course (livré)
+- **Circuit météo IA (Explorer)** : GET /api/coach/route-weather — Claude choisit le parcours du catalogue le plus adapté (abrité/ombragé/plat) selon météo live + direction du vent + séance du jour. Carte "Circuit conseillé par le coach" en haut d'Explorer, badge ★ Conseillé sur le parcours, conseil vent. Cache 1h par position (db.route_tips). Gestion permissions localisation (demande contextuelle + bouton réglages).
+- **Alerte météo course (Accueil)** : ville de course saisie par l'utilisateur (GET /api/geo/search géocodage Open-Meteo + PUT /api/profile/race-location). GET /api/race/weather : prévision du jour J (Open-Meteo daily, J-15 max), détection conditions difficiles (chaleur ≥27°C ressenti, vent ≥30 km/h, pluie ≥60%, orage, froid ≤0°C) → stratégie d'allure ajustée par Claude (cache quotidien db.race_alerts). Carte Accueil : saisie ville / J-X favorable / alerte orange avec drapeaux + stratégie dépliable. Notification la veille 18h si conditions difficiles (scheduleRaceWeatherAlert, device uniquement).
+- Composant : /app/frontend/src/components/RaceWeatherCard.tsx. Tests : 16/16 pytest (iteration_4.json), flows frontend validés.
+- Note démo : compte thomas@pace.app a race_date à J+2 (Annecy) pour visualiser l'alerte.

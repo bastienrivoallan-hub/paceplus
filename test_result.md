@@ -101,3 +101,14 @@
 #====================================================================================================
 # Testing Data - Main Agent and testing sub agent both should log testing data below this section
 #====================================================================================================
+## Iteration 4 — AI weather routes + race weather alert (main agent)
+- New backend endpoints (all under /api, auth Bearer token required):
+  - GET /api/geo/search?q= : Open-Meteo geocoding, returns {results:[{name,region,country,lat,lon}]}
+  - PUT /api/profile/race-location {city,lat,lon} : saves race city on user
+  - GET /api/race/weather : statuses no_race|past|need_location|too_far|ok|difficult. For difficult: flags[] + Claude "strategy" (cached per day in db.race_alerts)
+  - GET /api/coach/route-weather?lat&lon : live weather + wind direction, Claude picks best route from catalog, returns {route,reason,wind_tip,weather}; cached 1h in db.route_tips
+- fetch_weather now includes wind_direction_10m (wind_dir_deg in current)
+- RECOMMENDED_ROUTES entries now include "terrain" field
+- Frontend: RaceWeatherCard on Home (city search modal, forecast, flags, collapsible strategy); Explore has "Circuit selon la météo" card + recommended badge on route list; notifications.ts has scheduleRaceWeatherAlert (device-only)
+- Test account thomas@pace.app race_date temporarily set to J+2 with race_location Annecy => /api/race/weather returns "difficult" (chaleur) with strategy. Verified via curl + screenshots.
+- needs_retesting: true (backend iteration 4 endpoints + frontend flows)

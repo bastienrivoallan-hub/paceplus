@@ -143,6 +143,12 @@ class CoachBody(BaseModel):
     message: str
 
 
+class RaceLocationBody(BaseModel):
+    city: str
+    lat: float
+    lon: float
+
+
 # ----------------------------- auth -------------------------------------------
 
 @api.get("/")
@@ -729,12 +735,12 @@ async def coach_chat(body: CoachBody, user: dict = Depends(get_current_user)):
 # ----------------------------- explore ----------------------------------------
 
 RECOMMENDED_ROUTES = [
-    {"id": "r1", "name": "Boucle du Parc", "distance_km": 5.2, "elevation_m": 35, "surface": "Chemin", "difficulty": "Facile", "type": "easy"},
-    {"id": "r2", "name": "Piste - Fractionne", "distance_km": 0.4, "elevation_m": 0, "surface": "Piste", "difficulty": "Intense", "type": "intervals"},
-    {"id": "r3", "name": "Berges du Fleuve", "distance_km": 10.0, "elevation_m": 20, "surface": "Bitume", "difficulty": "Modere", "type": "long"},
-    {"id": "r4", "name": "Cotes du Coteau", "distance_km": 7.5, "elevation_m": 180, "surface": "Route", "difficulty": "Difficile", "type": "threshold"},
-    {"id": "r5", "name": "Foret - Trail doux", "distance_km": 8.3, "elevation_m": 120, "surface": "Sentier", "difficulty": "Modere", "type": "long"},
-    {"id": "r6", "name": "Tour de Ville", "distance_km": 6.0, "elevation_m": 45, "surface": "Bitume", "difficulty": "Facile", "type": "easy"},
+    {"id": "r1", "name": "Boucle du Parc", "distance_km": 5.2, "elevation_m": 35, "surface": "Chemin", "difficulty": "Facile", "type": "easy", "terrain": "plat, ombragé, abrité du vent par les arbres"},
+    {"id": "r2", "name": "Piste - Fractionne", "distance_km": 0.4, "elevation_m": 0, "surface": "Piste", "difficulty": "Intense", "type": "intervals", "terrain": "plat, dégagé, exposé au vent"},
+    {"id": "r3", "name": "Berges du Fleuve", "distance_km": 10.0, "elevation_m": 20, "surface": "Bitume", "difficulty": "Modere", "type": "long", "terrain": "plat, très dégagé, exposé au vent"},
+    {"id": "r4", "name": "Cotes du Coteau", "distance_km": 7.5, "elevation_m": 180, "surface": "Route", "difficulty": "Difficile", "type": "threshold", "terrain": "vallonné, exposé au soleil et au vent"},
+    {"id": "r5", "name": "Foret - Trail doux", "distance_km": 8.3, "elevation_m": 120, "surface": "Sentier", "difficulty": "Modere", "type": "long", "terrain": "vallonné, très abrité et ombragé"},
+    {"id": "r6", "name": "Tour de Ville", "distance_km": 6.0, "elevation_m": 45, "surface": "Bitume", "difficulty": "Facile", "type": "easy", "terrain": "plat, abrité entre les immeubles"},
 ]
 
 
@@ -800,7 +806,7 @@ async def fetch_weather(lat: float, lon: float, hours: int = 6):
     params = {
         "latitude": lat,
         "longitude": lon,
-        "current": "temperature_2m,apparent_temperature,wind_speed_10m,precipitation,precipitation_probability,weather_code",
+        "current": "temperature_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,precipitation,precipitation_probability,weather_code",
         "hourly": "temperature_2m,apparent_temperature,wind_speed_10m,precipitation_probability,weather_code",
         "forecast_days": 1,
         "timezone": "auto",
@@ -815,6 +821,7 @@ async def fetch_weather(lat: float, lon: float, hours: int = 6):
         "temperature_c": cur.get("temperature_2m"),
         "feels_like_c": cur.get("apparent_temperature"),
         "wind_kmh": cur.get("wind_speed_10m"),
+        "wind_dir_deg": cur.get("wind_direction_10m"),
         "precipitation_probability": cur.get("precipitation_probability"),
         "weather_code": cur.get("weather_code"),
         "condition": wmo_fr(cur.get("weather_code")),
@@ -960,6 +967,244 @@ Donne des conseils de nutrition et d'hydratation en français, en 3 parties cour
         logger.exception("nutrition failed")
         raise HTTPException(status_code=502, detail=str(e))
     return {"session_title": session["title"], "advice": advice}
+
+
+# ----------------------------- geo + race weather -----------------------------
+
+def deg_to_compass(deg) -> str:
+    if deg is None:
+        return "?"
+    dirs = ["nord", "nord-est", "est", "sud-est", "sud", "sud-ouest", "ouest", "nord-ouest"]
+    return dirs[int((float(deg) + 22.5) // 45) % 8]
+
+
+@api.get("/geo/search")
+async def geo_search(q: str, user: dict = Depends(get_current_user)):
+    q = q.strip()
+    if len(q) < 2:
+        return {"results": []}
+    try:
+        async with httpx.AsyncClient(timeout=10) as hc:
+            r = await hc.get(
+                "https://geocoding-api.open-meteo.com/v1/search",
+                params={"name": q, "count": 6, "language": "fr", "format": "json"},
+            )
+        r.raise_for_status()
+        data = r.json()
+    except Exception:
+        logger.exception("geo search failed")
+        raise HTTPException(status_code=502, detail="Recherche de ville indisponible")
+    results = [
+        {
+            "name": it.get("name"),
+            "region": it.get("admin1"),
+            "country": it.get("country"),
+            "lat": it.get("latitude"),
+            "lon": it.get("longitude"),
+        }
+        for it in (data.get("results") or [])
+    ]
+    return {"results": results}
+
+
+@api.put("/profile/race-location")
+async def save_race_location(body: RaceLocationBody, user: dict = Depends(get_current_user)):
+    if not (-90 <= body.lat <= 90 and -180 <= body.lon <= 180):
+        raise HTTPException(status_code=422, detail="Coordonnées invalides")
+    loc = {"city": body.city, "lat": body.lat, "lon": body.lon}
+    await db.users.update_one({"user_id": user["user_id"]}, {"$set": {"race_location": loc}})
+    await db.race_alerts.delete_many({"user_id": user["user_id"]})
+    return {"ok": True, "race_location": loc}
+
+
+async def fetch_race_day_forecast(lat: float, lon: float, race_date: str):
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "daily": "temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,"
+                 "wind_speed_10m_max,wind_gusts_10m_max,precipitation_probability_max,weather_code",
+        "forecast_days": 16,
+        "timezone": "auto",
+        "wind_speed_unit": "kmh",
+    }
+    async with httpx.AsyncClient(timeout=12) as hc:
+        r = await hc.get("https://api.open-meteo.com/v1/forecast", params=params)
+    r.raise_for_status()
+    d = r.json().get("daily", {})
+    times = d.get("time", [])
+    if race_date not in times:
+        return None
+    i = times.index(race_date)
+
+    def g(key):
+        arr = d.get(key, [])
+        return arr[i] if i < len(arr) else None
+
+    return {
+        "date": race_date,
+        "temp_max_c": g("temperature_2m_max"),
+        "temp_min_c": g("temperature_2m_min"),
+        "feels_max_c": g("apparent_temperature_max"),
+        "feels_min_c": g("apparent_temperature_min"),
+        "wind_max_kmh": g("wind_speed_10m_max"),
+        "gusts_kmh": g("wind_gusts_10m_max"),
+        "rain_prob": g("precipitation_probability_max"),
+        "weather_code": g("weather_code"),
+        "condition": wmo_fr(g("weather_code")),
+        "icon": wmo_icon(g("weather_code")),
+    }
+
+
+STORM_CODES = {95, 96, 99}
+HEAVY_PRECIP_CODES = {65, 66, 67, 75, 82, 86}
+
+
+def race_difficulty_flags(f: dict) -> List[str]:
+    flags = []
+    code = int(f.get("weather_code") if f.get("weather_code") is not None else -1)
+    if code in STORM_CODES:
+        flags.append("orage")
+    elif code in HEAVY_PRECIP_CODES:
+        flags.append("fortes précipitations")
+    if (f.get("feels_max_c") or 0) >= 27:
+        flags.append("chaleur")
+    if f.get("feels_min_c") is not None and f["feels_min_c"] <= 0:
+        flags.append("froid")
+    if (f.get("wind_max_kmh") or 0) >= 30:
+        flags.append("vent fort")
+    if (f.get("rain_prob") or 0) >= 60 and "orage" not in flags and "fortes précipitations" not in flags:
+        flags.append("pluie probable")
+    return flags
+
+
+@api.get("/race/weather")
+async def race_weather(user: dict = Depends(get_current_user)):
+    u = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    plan = await db.plans.find_one({"user_id": user["user_id"], "active": True}, {"_id": 0})
+    profile = u.get("profile") or {}
+    race_date = (plan or {}).get("race_date") or profile.get("race_date")
+    if not race_date:
+        return {"status": "no_race"}
+    try:
+        rd = datetime.strptime(race_date, "%Y-%m-%d").date()
+    except Exception:
+        return {"status": "no_race"}
+    days_left = (rd - date.today()).days
+    if days_left < 0:
+        return {"status": "past", "race_date": race_date}
+
+    loc = u.get("race_location")
+    goal_label = GOAL_LABELS.get((plan or {}).get("goal") or profile.get("goal") or "", "ta course")
+    base = {"race_date": race_date, "days_left": days_left, "goal_label": goal_label, "race_location": loc}
+    if not loc:
+        return {"status": "need_location", **base}
+    if days_left > 15:
+        return {"status": "too_far", **base}
+
+    try:
+        forecast = await fetch_race_day_forecast(loc["lat"], loc["lon"], race_date)
+    except Exception:
+        logger.exception("race forecast failed")
+        raise HTTPException(status_code=502, detail="Service météo indisponible")
+    if not forecast:
+        return {"status": "too_far", **base}
+
+    flags = race_difficulty_flags(forecast)
+    status = "difficult" if flags else "ok"
+    out = {"status": status, **base, "forecast": forecast, "flags": flags}
+
+    if status == "difficult":
+        today = date.today().isoformat()
+        cached = await db.race_alerts.find_one(
+            {"user_id": user["user_id"], "race_date": race_date, "day": today}, {"_id": 0}
+        )
+        if cached:
+            out["strategy"] = cached["strategy"]
+        else:
+            target = (plan or {}).get("target_time") or profile.get("target_time")
+            prompt = f"""Course {goal_label} dans {days_left} jour(s) ({race_date}) à {loc['city']}. Objectif chrono: {target or 'non renseigné'}.
+Météo prévue le jour J: {forecast['condition']}, ressenti max {forecast['feels_max_c']}°C (min {forecast['feels_min_c']}°C), vent {forecast['wind_max_kmh']} km/h (rafales {forecast['gusts_kmh']} km/h), probabilité de pluie {forecast['rain_prob']}%.
+Conditions difficiles détectées: {', '.join(flags)}.
+Donne en français une stratégie d'allure ajustée pour le jour J (4-6 phrases): ajustement d'allure chiffré si pertinent, gestion du départ, hydratation/équipement, gestion du vent ou de la météo. Termine par un mot rassurant."""
+            system = "Tu es un coach running expert en stratégie de course. Concret, précis, rassurant."
+            try:
+                strategy = await _claude(user["user_id"], "racewx", system).send_message(UserMessage(text=prompt))
+                await db.race_alerts.insert_one({
+                    "user_id": user["user_id"], "race_date": race_date, "day": today,
+                    "strategy": strategy, "created_at": now_utc().isoformat(),
+                })
+                out["strategy"] = strategy
+            except Exception:
+                logger.exception("race strategy failed")
+                out["strategy"] = None
+    return out
+
+
+# ----------------------------- AI weather route -------------------------------
+
+@api.get("/coach/route-weather")
+async def route_weather(lat: float, lon: float, user: dict = Depends(get_current_user)):
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise HTTPException(status_code=422, detail="Coordonnées invalides")
+
+    cached = await db.route_tips.find_one({"user_id": user["user_id"]}, {"_id": 0})
+    if cached and cached.get("pos") == [round(lat, 1), round(lon, 1)]:
+        try:
+            age = (now_utc() - datetime.fromisoformat(cached["created_at"])).total_seconds()
+        except Exception:
+            age = 1e9
+        if age < 3600:
+            return {k: cached.get(k) for k in ("route", "reason", "wind_tip", "weather")}
+
+    try:
+        w = await fetch_weather(lat, lon)
+    except Exception:
+        logger.exception("route weather fetch failed")
+        raise HTTPException(status_code=502, detail="Service météo indisponible")
+    c = w["current"]
+    wind_dir = deg_to_compass(c.get("wind_dir_deg"))
+
+    session = await db.sessions.find_one(
+        {"user_id": user["user_id"], "date": date.today().isoformat(), "type": {"$ne": "rest"}}, {"_id": 0}
+    )
+    session_txt = (
+        f"Séance du jour: {session['title']} ({session.get('subtitle') or ''}), intensité {session.get('intensity')}."
+        if session else "Pas de séance planifiée aujourd'hui (footing libre)."
+    )
+    catalog = "\n".join(
+        f"- id={r['id']} | {r['name']} | {r['distance_km']} km | {r['elevation_m']} m D+ | {r['surface']} | {r['terrain']} | type {r['type']}"
+        for r in RECOMMENDED_ROUTES
+    )
+    prompt = f"""Météo actuelle: {c['condition']}, {c['temperature_c']}°C (ressenti {c['feels_like_c']}°C), vent {c['wind_kmh']} km/h venant du {wind_dir}, probabilité de pluie {c['precipitation_probability']}%.
+{session_txt}
+Parcours disponibles:
+{catalog}
+Choisis LE parcours le plus adapté à cette météo et cette séance (abrité si vent/pluie, ombragé si chaleur, plat si conditions dures).
+Réponds UNIQUEMENT en JSON: {{"route_id": "...", "reason": "2-3 phrases en français expliquant le choix selon la météo", "wind_tip": "1 phrase sur comment gérer le vent (le vent vient du {wind_dir})"}}"""
+    system = "Tu es un coach running qui choisit des parcours selon la météo. Réponds uniquement en JSON valide."
+    try:
+        raw = await _claude(user["user_id"], "routewx", system).send_message(UserMessage(text=prompt))
+        parsed = parse_json_block(raw)
+    except Exception:
+        logger.exception("route weather claude failed")
+        raise HTTPException(status_code=502, detail="Le coach n'a pas pu analyser la météo")
+
+    route = next((r for r in RECOMMENDED_ROUTES if r["id"] == parsed.get("route_id")), RECOMMENDED_ROUTES[0])
+    out = {
+        "route": route,
+        "reason": parsed.get("reason"),
+        "wind_tip": parsed.get("wind_tip"),
+        "weather": {
+            "condition": c["condition"],
+            "temperature_c": c["temperature_c"],
+            "wind_kmh": c["wind_kmh"],
+            "wind_dir": wind_dir,
+            "icon": c["icon"],
+        },
+    }
+    await db.route_tips.delete_many({"user_id": user["user_id"]})
+    await db.route_tips.insert_one({"user_id": user["user_id"], "pos": [round(lat, 1), round(lon, 1)], "created_at": now_utc().isoformat(), **out})
+    return out
 
 
 # ----------------------------- startup ----------------------------------------

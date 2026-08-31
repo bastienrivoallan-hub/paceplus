@@ -94,4 +94,11 @@ export const api = {
   },
   weather: (lat: number, lon: number) => request(`/weather?lat=${lat}&lon=${lon}`),
   routes: () => request("/routes"),
+  routeWeather: (lat: number, lon: number) => request(`/coach/route-weather?lat=${lat}&lon=${lon}`),
+
+  // race weather
+  geoSearch: (q: string) => request(`/geo/search?q=${encodeURIComponent(q)}`),
+  saveRaceLocation: (city: string, lat: number, lon: number) =>
+    request("/profile/race-location", { method: "PUT", body: { city, lat, lon } }),
+  raceWeather: () => request("/race/weather"),
 };

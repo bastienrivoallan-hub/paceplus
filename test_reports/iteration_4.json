@@ -1,0 +1,37 @@
+{
+  "summary": "Iteration 4 tested end-to-end. Backend: 16/16 pytest passing (100%) covering: /api/geo/search (Paris returns results with name/region/country/lat/lon; q<2 chars returns empty; auth required); /api/profile/race-location (valid save returns ok+race_location, invalid lat -> 422, invalid lon -> 422); /api/race/weather (thomas@pace.app returns status='difficult' with race_date, days_left=2, goal_label='Semi-marathon', race_location=Annecy, forecast{temp_min/max, wind_max_kmh, rain_prob, condition, icon, weather_code}, flags=['chaleur'], and non-empty Claude strategy text; second call cached and fast <8s; auth required); /api/coach/route-weather?lat=45.9&lon=6.13 (returns route in {r1..r6} with 'terrain' field, French reason>15c, wind_tip, weather{condition,temperature_c,wind_kmh,wind_dir,icon}; cached second call <5s; invalid coords -> 422; auth required); regression /api/weather now exposes current.wind_dir_deg. Frontend (mobile 390x844): logged in as thomas@pace.app, Home shows 'ALERTE MÉTÉO COURSE' (race-weather-card) with 'J-2 · Semi-marathon à Annecy', forecast row (Couvert · 12–27°C · vent 6 km/h · pluie 0%), 'chaleur' flag pill, tapping 'race-strategy-toggle' expands 1424-char Claude strategy in 'race-strategy-text'. Pencil (race-edit-city) opens modal, typing 'Lyon' in 'race-city-input' produces 'race-city-result-0' (Lyon, Rhône-Alpes · France); selecting it saves and card reloads to 'Semi-marathon à Lyon, Rhône-Alpes' within ~2s. Explore tab shows 'Circuit selon la météo' CTA (route-weather-cta) — clicking on headless web produces no suggestion (expected, geolocation unavailable). Route list route-r1..route-r6 all render, filter-easy correctly hides route-r2 (intervals). Restored race_location to Annecy after tests to avoid state pollution.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration4_features.py",
+    "/app/test_reports/pytest/iter4_results.xml"
+  ],
+  "action_items": [
+    "No new issues found in iteration 4. Prior known caveat (deep-link/hard-reload 401 due to in-memory token in src/api.ts) from iteration_3 remains — not exercised by iteration 4 flows but still open."
+  ],
+  "critical_code_review_comments": [
+    "server.py /api/geo/search: correctly returns empty results for q<2 chars, requires auth, and maps Open-Meteo geocoding fields to name/region/country/lat/lon — good.",
+    "server.py /api/profile/race-location: manual 422 for out-of-range lat/lon; also invalidates db.race_alerts so next /api/race/weather re-generates strategy for the new city — good UX.",
+    "server.py /api/race/weather: sensible state machine (no_race / past / need_location / too_far / ok / difficult), flags derived from apparent temp/wind/rain/weather_code (STORM/HEAVY_PRECIP), Claude strategy cached per (user, race_date, day) in db.race_alerts — good.",
+    "server.py /api/coach/route-weather: 1h cache in db.route_tips per user, JSON-only Claude prompt with catalog terrain descriptors, wind_dir_deg -> French compass label — clean.",
+    "RaceWeatherCard.tsx: debounced geo search (400ms), reload after city save, notifications scheduling gated behind Platform.OS !== 'web' — correct.",
+    "The route-weather cache is keyed only by user_id (not lat/lon). If a user changes location within the hour, they will keep the previous city's suggestion. Low priority, worth noting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration4_features.py (created)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None — used pre-seeded thomas@pace.app (race_date J+2, race_location=Annecy). Restored Annecy at end of frontend run to keep state.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Auth: thomas@pace.app / secret123. Race state is intentionally J+2 with Annecy so /api/race/weather returns status='difficult' with flag 'chaleur' (feels_max_c >= 27). If you change race_location during a test, restore to Annecy (45.8992, 6.1294) via PUT /api/profile/race-location. Claude strategy call takes 15-40s the first time then is cached per (user, race_date, day) in db.race_alerts; /api/coach/route-weather is cached ~1h in db.route_tips per user_id (not per coords). /api/geo/search proxies Open-Meteo geocoding-api (no key). testIDs used: race-weather-card, race-too-far-card, race-set-city, race-edit-city, race-city-close, race-city-input, race-city-result-{i}, race-strategy-toggle, race-strategy-text, route-weather-card, route-weather-cta, route-weather-settings, route-r1..route-r6, filter-{all|easy|intervals|threshold|long}. Headless web has no geolocation so route-weather-cta click won't produce a suggestion — this is expected.",
+  "rca_of_issue": "N/A — no failures observed in iteration 4."
+}
