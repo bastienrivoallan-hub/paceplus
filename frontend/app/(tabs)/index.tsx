@@ -3,6 +3,7 @@ import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-n
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
+import * as Location from "expo-location";
 
 import { api } from "@/src/api";
 import { AppText, Card, Logo, PaceButton, ProgressRing, WorkoutBadge } from "@/src/components/ui";
@@ -39,6 +40,31 @@ export default function HomeScreen() {
   const router = useRouter();
   const [data, setData] = useState<any>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [weather, setWeather] = useState<any>(null);
+  const [weatherDenied, setWeatherDenied] = useState(false);
+
+  const loadWeather = useCallback(async () => {
+    try {
+      const perm = await Location.getForegroundPermissionsAsync();
+      if (!perm.granted) {
+        setWeatherDenied(true);
+        return;
+      }
+      setWeatherDenied(false);
+      let pos = await Location.getLastKnownPositionAsync();
+      if (!pos) pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Low });
+      if (!pos) return;
+      const w = await api.weather(pos.coords.latitude, pos.coords.longitude);
+      setWeather(w);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const enableWeather = async () => {
+    const r = await Location.requestForegroundPermissionsAsync();
+    if (r.granted) loadWeather();
+  };
 
   const load = useCallback(async () => {
     try {
@@ -52,7 +78,8 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load]),
+      loadWeather();
+    }, [load, loadWeather]),
   );
 
   const onRefresh = async () => {
@@ -100,6 +127,36 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
+
+        {/* Weather */}
+        {weather ? (
+          <Card style={styles.weatherCard} testID="weather-card">
+            <View style={styles.weatherIcon}>
+              <Ionicons name={weather.current.icon as any} size={28} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppText variant="bodyStrong">
+                {Math.round(weather.current.temperature_c)}°C · {weather.current.condition}
+              </AppText>
+              <AppText variant="caption" style={{ marginTop: 2 }}>
+                {weather.advice}
+              </AppText>
+            </View>
+          </Card>
+        ) : weatherDenied ? (
+          <Pressable testID="enable-weather" onPress={enableWeather} style={styles.weatherCard}>
+            <View style={styles.weatherIcon}>
+              <Ionicons name="partly-sunny" size={24} color={colors.primary} />
+            </View>
+            <View style={{ flex: 1 }}>
+              <AppText variant="bodyStrong">Activer la météo</AppText>
+              <AppText variant="caption" style={{ marginTop: 2 }}>
+                Adapte tes séances aux conditions du jour
+              </AppText>
+            </View>
+            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+          </Pressable>
+        ) : null}
 
         {/* Form of the day */}
         {form && (
@@ -289,6 +346,21 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
+  },
+  weatherCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.lg,
+    marginTop: spacing.xl,
+    padding: spacing.lg,
+  },
+  weatherIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: radius.md,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.primarySoft,
   },
   metricsGrid: {
     flexDirection: "row",

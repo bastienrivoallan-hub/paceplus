@@ -43,6 +43,20 @@ export default function SessionDetail() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [s, setS] = useState<any>(null);
+  const [nutrition, setNutrition] = useState<string | null>(null);
+  const [nutriLoading, setNutriLoading] = useState(false);
+
+  const loadNutrition = async () => {
+    setNutriLoading(true);
+    try {
+      const res = await api.nutrition({ session_id: String(id) });
+      setNutrition(res.advice);
+    } catch {
+      setNutrition("Conseils indisponibles pour le moment.");
+    } finally {
+      setNutriLoading(false);
+    }
+  };
 
   const load = async () => {
     try {
@@ -135,6 +149,32 @@ export default function SessionDetail() {
             {DESCRIPTIONS[s.type] || DESCRIPTIONS.easy}
           </AppText>
         </Card>
+
+        {s.type !== "rest" && (
+          <Card style={{ marginTop: spacing.lg }} testID="nutrition-card">
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.md }}>
+              <Ionicons name="nutrition" size={16} color={colors.orange} />
+              <AppText variant="label" style={{ color: colors.orange }}>
+                NUTRITION & HYDRATATION
+              </AppText>
+            </View>
+            {nutrition ? (
+              <AppText variant="body" style={{ color: colors.text, lineHeight: 22 }}>
+                {nutrition}
+              </AppText>
+            ) : (
+              <PaceButton
+                testID="nutrition-button"
+                label="Conseils du coach IA"
+                variant="secondary"
+                icon="sparkles"
+                loading={nutriLoading}
+                onPress={loadNutrition}
+                style={{ height: 48 }}
+              />
+            )}
+          </Card>
+        )}
 
         {s.type !== "rest" && (
           <PaceButton

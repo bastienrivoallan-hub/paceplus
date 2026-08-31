@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 3 tested end-to-end. Backend: 10/10 pytest (100%) — /api/weather returns current+next_hours+advice, rejects invalid coords (422), requires auth (401); Claude endpoints /api/coach/run-analysis (with 404 for unknown run, cached second call <5s), /api/coach/weekly-debrief (cached), /api/coach/nutrition all return substantial French text. Frontend (mobile 390x844, thomas@pace.app): Home shows 'enable-weather' card as expected in headless web (no geolocation) — no crash. Progression 'debrief-button' loads 'debrief-card' with 1330-char Claude debrief. Calendrier tile → Session detail → 'nutrition-button' loads 'nutrition-card' with structured Nutrition/Hydratation advice. Run summary via Progression run tile → 'analyze-run-button' loads 'run-analysis-card' with 1040-char coach analysis; PARCOURS SVG trace renders. Run active with geolocation granted shows 'sos-button' → modal shows 'sos-call' + 'sos-cancel'; tapping 'sos-cancel' closes it (sos-call not tapped). One minor issue observed: auth token is kept only in-memory in src/api.ts, so hard-reload / deep-link on /run/summary/[id] fires /api/runs/{id} before AuthContext rehydrates → 401 → stuck spinner. Normal in-app navigation is unaffected.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [
+      {
+        "flow": "Deep-link / hard reload on /run/summary/[id]",
+        "issue": "/api/runs/{id} is called before the AuthContext rehydrates the bearer token, returning 401 and leaving the page stuck on the loading spinner. In-app navigation from Progression works fine. Root cause: src/api.ts stores authToken only in memory (line 5-6). Fix: persist to AsyncStorage and await token restore before firing initial fetches (or wrap fetches in an isAuthed guard in run/summary/[id].tsx useEffect).",
+        "affected_testIDs": ["analyze-run-button", "run-analysis-card"]
+      }
+    ],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration3_features.py",
+    "/app/test_reports/pytest/iter3_results.xml"
+  ],
+  "action_items": [
+    "Persist the session_token to AsyncStorage in src/api.ts (and restore it in AuthContext before rendering pages that fetch), so deep-links / hard reloads to /run/summary/[id] and similar routes no longer 401. Nice-to-have: add a retry/redirect in run/summary/[id].tsx when api.run() throws 401."
+  ],
+  "critical_code_review_comments": [
+    "src/api.ts: authToken is only in memory; any hard reload of an authenticated route races the fetch against auth hydration. Fix as above.",
+    "server.py /api/weather: correctly validates lat/lon ranges (422) and requires auth via Depends(get_current_user). Open-Meteo call is cleanly wrapped and returns 502 on upstream error — good.",
+    "server.py /api/coach/run-analysis: caches result on the run doc; /api/coach/weekly-debrief: caches per (user, plan, week) in db.debriefs — good.",
+    "server.py /api/coach/nutrition: gracefully swallows weather fetch errors so advice is still produced — good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration3_features.py (created)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "95%"},
+  "seed_data_creation": "None — used pre-seeded thomas@pace.app plan + run_4d2a1a46548b.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Auth: thomas@pace.app / secret123. Seeded run: run_4d2a1a46548b. Claude endpoints are cached on second call. Web preview headless has no geolocation → Home shows 'enable-weather' by design; grant geolocation in Playwright context (ctx.grant_permissions(['geolocation'])) to reach /run/active SOS. Known caveat: hard-reload on /run/summary/[id] causes 401 due to in-memory token — main agent should persist token to storage.",
+  "rca_of_issue": "Repro: 1) login → 2) navigate to /run/summary/run_4d2a1a46548b → analyze-run-button appears and works. 3) page.reload() → /api/runs/{id} fires immediately with no Authorization header (authToken in api.ts is undefined) → 401 → run state stays null → UI stuck on ActivityIndicator. /api/auth/me runs concurrently and returns 200 later because AuthContext hydrates from storage, but the run page does not retry. Fix: (a) persist token via AsyncStorage in api.ts setAuthToken + async getAuthToken, (b) in AuthContext restore token before rendering children, or (c) guard run/summary useEffect on isAuthLoaded flag."
+}

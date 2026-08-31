@@ -1,62 +1,33 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { ActivityIndicator, ScrollView, StyleSheet, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
-import Svg, { Polyline, Circle } from "react-native-svg";
 
 import { api } from "@/src/api";
 import { AppText, Card, PaceButton } from "@/src/components/ui";
+import RunMap from "@/src/components/RunMap";
 import { colors, fmtDuration, fonts, radius, spacing } from "@/src/theme";
-
-function RouteTrace({ route }: { route: any[] }) {
-  const W = 320;
-  const H = 170;
-  const pad = 16;
-  if (!route || route.length < 2) {
-    return (
-      <View style={[styles.mapBox, { height: H, alignItems: "center", justifyContent: "center" }]}>
-        <Ionicons name="map-outline" size={30} color={colors.textMuted} />
-        <AppText variant="caption" style={{ marginTop: 8 }}>
-          Tracé GPS indisponible
-        </AppText>
-      </View>
-    );
-  }
-  const lats = route.map((p) => p.latitude);
-  const lons = route.map((p) => p.longitude);
-  const minLat = Math.min(...lats), maxLat = Math.max(...lats);
-  const minLon = Math.min(...lons), maxLon = Math.max(...lons);
-  const spanLat = maxLat - minLat || 1e-6;
-  const spanLon = maxLon - minLon || 1e-6;
-  const scale = Math.min((W - pad * 2) / spanLon, (H - pad * 2) / spanLat);
-  const offX = (W - spanLon * scale) / 2;
-  const offY = (H - spanLat * scale) / 2;
-  const pts = route
-    .map((p) => {
-      const x = offX + (p.longitude - minLon) * scale;
-      const y = H - (offY + (p.latitude - minLat) * scale);
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const first = pts.split(" ")[0].split(",");
-  const last = pts.split(" ").slice(-1)[0].split(",");
-  return (
-    <View style={[styles.mapBox, { height: H }]}>
-      <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`}>
-        <Polyline points={pts} fill="none" stroke={colors.primary} strokeWidth={4} strokeLinejoin="round" strokeLinecap="round" />
-        <Circle cx={Number(first[0])} cy={Number(first[1])} r={6} fill={colors.blue} />
-        <Circle cx={Number(last[0])} cy={Number(last[1])} r={6} fill={colors.pink} />
-      </Svg>
-    </View>
-  );
-}
 
 export default function RunSummary() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const [run, setRun] = useState<any>(null);
+  const [analysis, setAnalysis] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const analyze = async () => {
+    setAnalyzing(true);
+    try {
+      const res = await api.runAnalysis(String(id));
+      setAnalysis(res.analysis);
+    } catch {
+      setAnalysis("Analyse indisponible pour le moment.");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -93,7 +64,7 @@ export default function RunSummary() {
         </AppText>
       </View>
 
-      <View style={{ padding: spacing.xl }}>
+      <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingBottom: spacing.md }}>
         <Card>
           <View style={{ flexDirection: "row" }}>
             <Big label="DISTANCE" value={`${(run.distance_m / 1000).toFixed(2)}`} unit="km" />
@@ -107,7 +78,7 @@ export default function RunSummary() {
         <AppText variant="label" style={{ marginTop: spacing.xl, marginBottom: spacing.md }}>
           PARCOURS
         </AppText>
-        <RouteTrace route={run.route} />
+        <RunMap route={run.route} height={190} />
 
         {splits.length > 0 && (
           <>
@@ -131,9 +102,29 @@ export default function RunSummary() {
             </Card>
           </>
         )}
-      </View>
 
-      <View style={{ marginTop: "auto", paddingHorizontal: spacing.xl, paddingBottom: insets.bottom + spacing.lg }}>
+        <AppText variant="label" style={{ marginTop: spacing.xl, marginBottom: spacing.md }}>
+          ANALYSE DU COACH IA
+        </AppText>
+        {analysis ? (
+          <Card testID="run-analysis-card">
+            <AppText variant="body" style={{ color: colors.text, lineHeight: 22 }}>
+              {analysis}
+            </AppText>
+          </Card>
+        ) : (
+          <PaceButton
+            testID="analyze-run-button"
+            label="Analyser ma course"
+            variant="secondary"
+            icon="sparkles"
+            loading={analyzing}
+            onPress={analyze}
+          />
+        )}
+      </ScrollView>
+
+      <View style={{ paddingHorizontal: spacing.xl, paddingBottom: insets.bottom + spacing.lg, paddingTop: spacing.sm }}>
         <PaceButton testID="summary-done" label="Terminé" onPress={() => router.replace("/(tabs)")} />
       </View>
     </View>

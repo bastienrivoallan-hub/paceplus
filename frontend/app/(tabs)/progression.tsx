@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { api } from "@/src/api";
-import { AppText, Card, Logo } from "@/src/components/ui";
+import { AppText, Card, Logo, PaceButton } from "@/src/components/ui";
 import { colors, fmtDuration, fonts, radius, spacing, workoutMeta } from "@/src/theme";
 
 export default function ProgressionScreen() {
@@ -13,6 +13,20 @@ export default function ProgressionScreen() {
   const router = useRouter();
   const [stats, setStats] = useState<any>(null);
   const [runs, setRuns] = useState<any[]>([]);
+  const [debrief, setDebrief] = useState<string | null>(null);
+  const [debriefLoading, setDebriefLoading] = useState(false);
+
+  const loadDebrief = async () => {
+    setDebriefLoading(true);
+    try {
+      const res = await api.weeklyDebrief();
+      setDebrief(res.debrief);
+    } catch {
+      setDebrief("Débrief indisponible pour le moment.");
+    } finally {
+      setDebriefLoading(false);
+    }
+  };
 
   const load = useCallback(async () => {
     try {
@@ -45,6 +59,30 @@ export default function ProgressionScreen() {
         <AppText variant="body" style={{ marginTop: 4, marginBottom: spacing.xl }}>
           Ton évolution semaine après semaine.
         </AppText>
+
+        <Card style={{ marginBottom: spacing.xl }} testID="debrief-card">
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm }}>
+            <Ionicons name="sparkles" size={16} color={colors.primary} />
+            <AppText variant="label" style={{ color: colors.primary }}>
+              DÉBRIEF DE LA SEMAINE
+            </AppText>
+          </View>
+          {debrief ? (
+            <AppText variant="body" style={{ color: colors.text, lineHeight: 22 }}>
+              {debrief}
+            </AppText>
+          ) : (
+            <PaceButton
+              testID="debrief-button"
+              label="Générer mon débrief IA"
+              variant="secondary"
+              icon="chatbubble-ellipses"
+              loading={debriefLoading}
+              onPress={loadDebrief}
+              style={{ height: 48 }}
+            />
+          )}
+        </Card>
 
         <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.md }}>
           <StatBox icon="map-outline" color={colors.primary} value={`${stats?.total_distance_km ?? 0}`} unit="km" label="Distance totale" />

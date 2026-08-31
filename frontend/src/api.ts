@@ -1,4 +1,8 @@
+import { storage } from "@/src/utils/storage";
+
 const BASE = `${process.env.EXPO_PUBLIC_BACKEND_URL}/api`;
+
+const TOKEN_KEY = "pace_session_token";
 
 let authToken: string | null = null;
 
@@ -19,6 +23,10 @@ async function request<T = any>(
   opts: { method?: string; body?: any } = {},
 ): Promise<T> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (!authToken) {
+    const stored = await storage.secureGet<string>(TOKEN_KEY, "");
+    if (stored) authToken = stored;
+  }
   if (authToken) headers["Authorization"] = `Bearer ${authToken}`;
 
   const res = await fetch(`${BASE}${path}`, {
@@ -74,5 +82,16 @@ export const api = {
   // coach + explore
   coachHistory: () => request("/coach/history"),
   coachChat: (message: string) => request("/coach/chat", { method: "POST", body: { message } }),
+  runAnalysis: (run_id: string) => request("/coach/run-analysis", { method: "POST", body: { run_id } }),
+  weeklyDebrief: () => request("/coach/weekly-debrief"),
+  nutrition: (params: { session_id?: string; lat?: number; lon?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (params.session_id) q.set("session_id", params.session_id);
+    if (params.lat != null) q.set("lat", String(params.lat));
+    if (params.lon != null) q.set("lon", String(params.lon));
+    const qs = q.toString();
+    return request(`/coach/nutrition${qs ? `?${qs}` : ""}`);
+  },
+  weather: (lat: number, lon: number) => request(`/weather?lat=${lat}&lon=${lon}`),
   routes: () => request("/routes"),
 };

@@ -34,6 +34,16 @@ Build a mobile Running Coach app from a Figma mockup ("PACE"). Dark/minimal desi
 - ✅ AI Coach chat (Claude Sonnet 5) with history + suggestions.
 - ✅ Tested: 19/19 backend pytest passed; frontend E2E verified.
 
+## Implemented (2026-08-31 — iteration 3)
+- ✅ Météo temps réel (Open-Meteo, sans clé): endpoint `GET /api/weather` (conditions + prochaines heures + conseil FR); widget météo sur l'Accueil; intégrée aux conseils nutrition.
+- ✅ Analyse de course IA (`POST /api/coach/run-analysis`, cache) affichée sur le bilan de course.
+- ✅ Débrief hebdomadaire IA (`GET /api/coach/weekly-debrief`, cache) sur Progression.
+- ✅ Conseils nutrition & hydratation IA (`GET /api/coach/nutrition`, avant/pendant/après, adaptés météo) sur le détail de séance.
+- ✅ Carte de suivi en direct pendant la course (react-native-maps natif + fallback SVG web) sur l'écran run + tracé sur le bilan.
+- ✅ Bouton SOS sur l'écran de course → ouvre le numéro d'urgence 112 + affiche les coordonnées GPS.
+- ✅ Robustesse: le client API relit le token stocké (deep-link/hard reload).
+- ✅ Testé: iteration 3 backend 10/10 pytest + flux frontend validés.
+
 ## Backlog / remaining
 - P1: Real map tiles on run tracker (react-native-maps, needs device build) — route trace on summary already done via SVG.
 - P1: Wearable/health data integration for real readiness metrics (currently deterministic pseudo-data).

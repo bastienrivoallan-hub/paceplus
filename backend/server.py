@@ -133,8 +133,10 @@ class RunBody(BaseModel):
 
 class AdaptBody(BaseModel):
     week: Optional[int] = None
-    session_id: Optional[str] = None
-    avg_pace: Optional[str] = None
+
+
+class RunAnalysisBody(BaseModel):
+    run_id: str
 
 
 class CoachBody(BaseModel):
@@ -739,6 +741,225 @@ RECOMMENDED_ROUTES = [
 @api.get("/routes")
 async def routes(user: dict = Depends(get_current_user)):
     return {"routes": RECOMMENDED_ROUTES}
+
+
+# ----------------------------- weather (Open-Meteo) ---------------------------
+
+WMO_FR = {
+    0: "Ciel dégagé", 1: "Peu nuageux", 2: "Partiellement nuageux", 3: "Couvert",
+    45: "Brouillard", 48: "Brouillard givrant",
+    51: "Bruine légère", 53: "Bruine", 55: "Bruine dense",
+    61: "Pluie faible", 63: "Pluie", 65: "Pluie forte",
+    66: "Pluie verglaçante", 67: "Pluie verglaçante forte",
+    71: "Neige faible", 73: "Neige", 75: "Neige forte", 77: "Grésil",
+    80: "Averses", 81: "Averses", 82: "Averses violentes",
+    85: "Averses de neige", 86: "Averses de neige",
+    95: "Orage", 96: "Orage avec grêle", 99: "Orage violent",
+}
+
+
+def wmo_fr(code):
+    return WMO_FR.get(int(code) if code is not None else -1, "Conditions variables")
+
+
+def wmo_icon(code):
+    c = int(code) if code is not None else -1
+    if c == 0:
+        return "sunny"
+    if c in (1, 2):
+        return "partly-sunny"
+    if c == 3:
+        return "cloudy"
+    if c in (45, 48):
+        return "cloud"
+    if 51 <= c <= 67 or c in (80, 81, 82):
+        return "rainy"
+    if 71 <= c <= 77 or c in (85, 86):
+        return "snow"
+    if c in (95, 96, 99):
+        return "thunderstorm"
+    return "partly-sunny"
+
+
+def weather_advice_fr(feels, wind, rain, code):
+    c = int(code) if code is not None else -1
+    if c in (95, 96, 99):
+        return "Orage annoncé : mieux vaut reporter ou courir en salle."
+    if (rain or 0) >= 70:
+        return "Pluie probable : choisis un parcours abrité et des chaussures qui accrochent."
+    if (wind or 0) >= 35:
+        return "Vent fort : privilégie un parcours abrité et pars face au vent."
+    if feels is not None and feels >= 30:
+        return "Forte chaleur : raccourcis, ralentis et emporte de l'eau."
+    if feels is not None and feels <= 0:
+        return "Froid : échauffe-toi progressivement et couvre-toi bien."
+    return "Conditions favorables pour courir. Bonne séance !"
+
+
+async def fetch_weather(lat: float, lon: float, hours: int = 6):
+    params = {
+        "latitude": lat,
+        "longitude": lon,
+        "current": "temperature_2m,apparent_temperature,wind_speed_10m,precipitation,precipitation_probability,weather_code",
+        "hourly": "temperature_2m,apparent_temperature,wind_speed_10m,precipitation_probability,weather_code",
+        "forecast_days": 1,
+        "timezone": "auto",
+        "wind_speed_unit": "kmh",
+    }
+    async with httpx.AsyncClient(timeout=12) as hc:
+        r = await hc.get("https://api.open-meteo.com/v1/forecast", params=params)
+    r.raise_for_status()
+    src = r.json()
+    cur = src.get("current", {})
+    current = {
+        "temperature_c": cur.get("temperature_2m"),
+        "feels_like_c": cur.get("apparent_temperature"),
+        "wind_kmh": cur.get("wind_speed_10m"),
+        "precipitation_probability": cur.get("precipitation_probability"),
+        "weather_code": cur.get("weather_code"),
+        "condition": wmo_fr(cur.get("weather_code")),
+        "icon": wmo_icon(cur.get("weather_code")),
+    }
+    h = src.get("hourly", {})
+    times = h.get("time", [])
+    now_iso = cur.get("time")
+    start = 0
+    if now_iso in times:
+        start = times.index(now_iso)
+    nxt = []
+    for i in range(start, min(start + hours, len(times))):
+        nxt.append({
+            "time": times[i],
+            "temperature_c": h.get("temperature_2m", [None])[i],
+            "precipitation_probability": h.get("precipitation_probability", [None])[i],
+            "weather_code": h.get("weather_code", [None])[i],
+            "condition": wmo_fr(h.get("weather_code", [None])[i]),
+            "icon": wmo_icon(h.get("weather_code", [None])[i]),
+        })
+    advice = weather_advice_fr(current["feels_like_c"], current["wind_kmh"],
+                               current["precipitation_probability"], current["weather_code"])
+    return {"current": current, "next_hours": nxt, "advice": advice, "source": "Open-Meteo"}
+
+
+@api.get("/weather")
+async def weather(lat: float, lon: float, user: dict = Depends(get_current_user)):
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise HTTPException(status_code=422, detail="Coordonnées invalides")
+    try:
+        return await fetch_weather(lat, lon)
+    except Exception as e:
+        logger.exception("weather failed")
+        raise HTTPException(status_code=502, detail="Service météo indisponible")
+
+
+# ----------------------------- AI coaching (analysis / debrief / nutrition) ---
+
+def _claude(user_id: str, tag: str, system: str) -> LlmChat:
+    return LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"{tag}_{user_id}_{uuid.uuid4().hex[:6]}",
+        system_message=system,
+    ).with_model("anthropic", "claude-sonnet-5")
+
+
+@api.post("/coach/run-analysis")
+async def run_analysis(body: RunAnalysisBody, user: dict = Depends(get_current_user)):
+    run = await db.runs.find_one({"run_id": body.run_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not run:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+    if run.get("analysis"):
+        return {"analysis": run["analysis"]}
+
+    plan = await db.plans.find_one({"user_id": user["user_id"], "active": True}, {"_id": 0})
+    splits = run.get("splits", [])
+    splits_txt = ", ".join(f"km{s['km']}:{s['pace']}" for s in splits) or "non disponibles"
+    prompt = f"""Analyse cette course d'un coureur (objectif: {GOAL_LABELS.get(plan.get('goal') if plan else '', 'course')}).
+Distance: {round(run['distance_m']/1000,2)} km. Temps: {run['duration_s']//60} min. Allure moyenne: {run.get('avg_pace') or 'n/a'}/km.
+Temps au km: {splits_txt}.
+Donne un feedback en français (4-6 phrases): régularité de l'allure, points forts, un axe d'amélioration concret, et un mot d'encouragement."""
+
+    system = "Tu es un coach running expert et bienveillant. Sois concret et motivant."
+    try:
+        analysis = await _claude(user["user_id"], "runan", system).send_message(UserMessage(text=prompt))
+    except Exception as e:
+        logger.exception("run analysis failed")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    await db.runs.update_one({"run_id": body.run_id}, {"$set": {"analysis": analysis}})
+    return {"analysis": analysis}
+
+
+@api.get("/coach/weekly-debrief")
+async def weekly_debrief(user: dict = Depends(get_current_user)):
+    plan = await db.plans.find_one({"user_id": user["user_id"], "active": True}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=400, detail="Aucun plan actif")
+    start = datetime.strptime(plan["start_date"], "%Y-%m-%d").date()
+    monday = start - timedelta(days=start.weekday())
+    current_week = max(1, min(plan["total_weeks"], (date.today() - monday).days // 7 + 1))
+    week = max(1, current_week - 1) if current_week > 1 else 1
+
+    cached = await db.debriefs.find_one({"user_id": user["user_id"], "plan_id": plan["plan_id"], "week": week}, {"_id": 0})
+    if cached:
+        return {"week": week, "debrief": cached["debrief"]}
+
+    sessions = await db.sessions.find({"user_id": user["user_id"], "week": week, "type": {"$ne": "rest"}}, {"_id": 0}).to_list(20)
+    done = [s for s in sessions if s.get("completed")]
+    missed = [s for s in sessions if not s.get("completed")]
+    wk_dates = [(monday + timedelta(weeks=week - 1, days=i)).isoformat() for i in range(7)]
+    runs = await db.runs.find({"user_id": user["user_id"], "date": {"$regex": f"^({'|'.join(wk_dates)})"}}, {"_id": 0}).to_list(50)
+    km = round(sum(r.get("distance_m", 0) for r in runs) / 1000.0, 1)
+
+    prompt = f"""Débrief de la semaine {week} d'un plan {GOAL_LABELS.get(plan.get('goal'), 'course')}.
+Séances prévues: {len(sessions)} — réalisées: {len(done)}, manquées: {len(missed)}.
+Types réalisés: {[s['type'] for s in done] or 'aucun'}. Volume couru: {km} km.
+Rédige un débrief en français (5-7 phrases): bilan de l'assiduité, ce qui a bien marché, ce qu'il faut ajuster, et l'objectif de la semaine suivante. Ton motivant."""
+    system = "Tu es un coach running qui fait des bilans hebdomadaires clairs et encourageants."
+    try:
+        debrief = await _claude(user["user_id"], "debrief", system).send_message(UserMessage(text=prompt))
+    except Exception as e:
+        logger.exception("debrief failed")
+        raise HTTPException(status_code=502, detail=str(e))
+
+    await db.debriefs.insert_one({
+        "user_id": user["user_id"], "plan_id": plan["plan_id"], "week": week,
+        "debrief": debrief, "created_at": now_utc().isoformat(),
+    })
+    return {"week": week, "debrief": debrief}
+
+
+@api.get("/coach/nutrition")
+async def nutrition(
+    session_id: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    user: dict = Depends(get_current_user),
+):
+    if session_id:
+        session = await db.sessions.find_one({"session_id": session_id, "user_id": user["user_id"]}, {"_id": 0})
+    else:
+        session = await db.sessions.find_one({"user_id": user["user_id"], "date": date.today().isoformat()}, {"_id": 0})
+    if not session:
+        raise HTTPException(status_code=404, detail="Séance introuvable")
+
+    weather_txt = ""
+    if lat is not None and lon is not None:
+        try:
+            w = await fetch_weather(lat, lon)
+            c = w["current"]
+            weather_txt = f" Météo: {c['condition']}, {c['temperature_c']}°C (ressenti {c['feels_like_c']}°C), pluie {c['precipitation_probability']}%."
+        except Exception:
+            weather_txt = ""
+
+    prompt = f"""Séance du jour: {session['title']} ({session.get('subtitle') or ''}), intensité {session.get('intensity')}, durée {session.get('duration_min')} min.{weather_txt}
+Donne des conseils de nutrition et d'hydratation en français, en 3 parties courtes: AVANT, PENDANT, APRÈS. Adapte à l'intensité et à la météo si fournie. Sois concret (aliments, timing, quantités approximatives)."""
+    system = "Tu es un nutritionniste du sport spécialisé course à pied. Réponses concrètes et sûres."
+    try:
+        advice = await _claude(user["user_id"], "nutri", system).send_message(UserMessage(text=prompt))
+    except Exception as e:
+        logger.exception("nutrition failed")
+        raise HTTPException(status_code=502, detail=str(e))
+    return {"session_title": session["title"], "advice": advice}
 
 
 # ----------------------------- startup ----------------------------------------

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Linking, Platform, Pressable, StyleSheet, View } from "react-native";
+import { Linking, Modal, Platform, Pressable, StyleSheet, View } from "react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,6 +8,7 @@ import * as Haptics from "expo-haptics";
 
 import { api } from "@/src/api";
 import { AppText, PaceButton } from "@/src/components/ui";
+import RunMap from "@/src/components/RunMap";
 import { colors, fmtDuration, fonts, radius, spacing } from "@/src/theme";
 
 function haversine(a: any, b: any) {
@@ -32,6 +33,9 @@ export default function ActiveRun() {
   const [elapsed, setElapsed] = useState(0);
   const [distance, setDistance] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [routeState, setRouteState] = useState<any[]>([]);
+  const [currentCoord, setCurrentCoord] = useState<any>(null);
+  const [showSos, setShowSos] = useState(false);
 
   const watchSub = useRef<Location.LocationSubscription | null>(null);
   const timer = useRef<any>(null);
@@ -79,7 +83,10 @@ export default function ActiveRun() {
         (loc) => {
           if (pausedRef.current) return;
           const c = loc.coords;
-          route.current.push({ latitude: c.latitude, longitude: c.longitude });
+          const coord = { latitude: c.latitude, longitude: c.longitude };
+          route.current.push(coord);
+          setCurrentCoord(coord);
+          setRouteState(route.current.slice());
           if (lastCoord.current) {
             const d = haversine(lastCoord.current, c);
             if (d < 60) {
@@ -188,26 +195,34 @@ export default function ActiveRun() {
             {running ? (paused ? "En pause" : "En cours") : "Prêt"}
           </AppText>
         </View>
-        <View style={{ width: 26 }} />
+        <Pressable testID="sos-button" onPress={() => setShowSos(true)} style={styles.sosBtn}>
+          <Ionicons name="warning" size={16} color="#fff" />
+          <AppText style={{ color: "#fff", fontFamily: fonts.displayBold, fontSize: 13 }}>SOS</AppText>
+        </Pressable>
       </View>
 
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: spacing.xl }}>
-        <AppText variant="label" style={{ letterSpacing: 2 }}>DISTANCE</AppText>
-        <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
-          <AppText style={{ fontFamily: fonts.displayBold, fontSize: 84, color: colors.text }}>
-            {(distance / 1000).toFixed(2)}
-          </AppText>
-          <AppText style={{ fontFamily: fonts.displaySemibold, fontSize: 26, color: colors.textSecondary, marginBottom: 18, marginLeft: 6 }}>
-            km
-          </AppText>
-        </View>
+      <View style={{ flex: 1, paddingHorizontal: spacing.xl }}>
+        {running && routeState.length > 1 ? (
+          <RunMap route={routeState} current={currentCoord} follow height={190} style={{ marginBottom: spacing.lg }} />
+        ) : null}
+        <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+          <AppText variant="label" style={{ letterSpacing: 2 }}>DISTANCE</AppText>
+          <View style={{ flexDirection: "row", alignItems: "flex-end" }}>
+            <AppText style={{ fontFamily: fonts.displayBold, fontSize: 84, color: colors.text }}>
+              {(distance / 1000).toFixed(2)}
+            </AppText>
+            <AppText style={{ fontFamily: fonts.displaySemibold, fontSize: 26, color: colors.textSecondary, marginBottom: 18, marginLeft: 6 }}>
+              km
+            </AppText>
+          </View>
 
-        <View style={styles.statsRow}>
-          <BigStat label="TEMPS" value={fmtDuration(elapsed)} />
-          <View style={styles.vline} />
-          <BigStat label="ALLURE /KM" value={pace} />
-          <View style={styles.vline} />
-          <BigStat label="KM/H" value={speed} />
+          <View style={styles.statsRow}>
+            <BigStat label="TEMPS" value={fmtDuration(elapsed)} />
+            <View style={styles.vline} />
+            <BigStat label="ALLURE /KM" value={pace} />
+            <View style={styles.vline} />
+            <BigStat label="KM/H" value={speed} />
+          </View>
         </View>
       </View>
 
@@ -235,6 +250,45 @@ export default function ActiveRun() {
           </View>
         )}
       </View>
+
+      <Modal visible={showSos} transparent animationType="fade" onRequestClose={() => setShowSos(false)}>
+        <View style={styles.sosOverlay}>
+          <View style={styles.sosCard}>
+            <View style={styles.sosIcon}>
+              <Ionicons name="warning" size={30} color={colors.danger} />
+            </View>
+            <AppText variant="h3" style={{ marginTop: spacing.md, textAlign: "center" }}>
+              Besoin d'aide ?
+            </AppText>
+            <AppText variant="body" style={{ marginTop: spacing.sm, textAlign: "center" }}>
+              Appuie pour ouvrir le numéro d'urgence européen (112). Communique ta position aux secours.
+            </AppText>
+            {currentCoord ? (
+              <View style={styles.coordBox}>
+                <Ionicons name="location" size={16} color={colors.primary} />
+                <AppText variant="bodyStrong" style={{ fontSize: 13 }} testID="sos-coords">
+                  {currentCoord.latitude.toFixed(5)}, {currentCoord.longitude.toFixed(5)}
+                </AppText>
+              </View>
+            ) : null}
+            <PaceButton
+              testID="sos-call"
+              label="Appeler les secours (112)"
+              icon="call"
+              onPress={() => {
+                Linking.openURL("tel:112");
+                setShowSos(false);
+              }}
+              style={{ marginTop: spacing.xl, alignSelf: "stretch", backgroundColor: colors.danger }}
+            />
+            <Pressable testID="sos-cancel" onPress={() => setShowSos(false)} style={{ marginTop: spacing.md, padding: spacing.md }}>
+              <AppText variant="bodyStrong" style={{ color: colors.textSecondary }}>
+                Annuler
+              </AppText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -287,6 +341,51 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.primary },
+  sosBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: colors.danger,
+    borderRadius: radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  sosOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: spacing.xl,
+  },
+  sosCard: {
+    width: "100%",
+    backgroundColor: colors.card,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.xl,
+    alignItems: "center",
+  },
+  sosIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: "rgba(239,91,123,0.15)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  coordBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    backgroundColor: colors.bgElevated,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+  },
   statsRow: {
     flexDirection: "row",
     alignItems: "center",
