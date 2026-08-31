@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
-import { ScrollView, StyleSheet, View } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { ScrollView, StyleSheet, View, Pressable } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
@@ -10,6 +10,7 @@ import { colors, fmtDuration, fonts, radius, spacing, workoutMeta } from "@/src/
 
 export default function ProgressionScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [stats, setStats] = useState<any>(null);
   const [runs, setRuns] = useState<any[]>([]);
 
@@ -89,23 +90,26 @@ export default function ProgressionScreen() {
             {runs.map((r) => {
               const meta = workoutMeta("easy");
               return (
-                <Card key={r.run_id} style={styles.runRow} testID={`run-${r.run_id}`}>
-                  <View style={[styles.runIcon, { backgroundColor: `${meta.color}22` }]}>
-                    <Ionicons name="walk" size={20} color={meta.color} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <AppText variant="bodyStrong">{(r.distance_m / 1000).toFixed(2)} km</AppText>
-                    <AppText variant="caption" style={{ marginTop: 2 }}>
-                      {new Date(r.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-                    </AppText>
-                  </View>
-                  <View style={{ alignItems: "flex-end" }}>
-                    <AppText variant="bodyStrong">{fmtDuration(r.duration_s)}</AppText>
-                    <AppText variant="caption" style={{ marginTop: 2 }}>
-                      {r.avg_pace || "—"} /km
-                    </AppText>
-                  </View>
-                </Card>
+                <Pressable key={r.run_id} onPress={() => router.push(`/run/summary/${r.run_id}`)} testID={`run-${r.run_id}`}>
+                  <Card style={styles.runRow}>
+                    <View style={[styles.runIcon, { backgroundColor: `${meta.color}22` }]}>
+                      <Ionicons name="walk" size={20} color={meta.color} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <AppText variant="bodyStrong">{(r.distance_m / 1000).toFixed(2)} km</AppText>
+                      <AppText variant="caption" style={{ marginTop: 2 }}>
+                        {new Date(r.date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                      </AppText>
+                    </View>
+                    <View style={{ alignItems: "flex-end" }}>
+                      <AppText variant="bodyStrong">{fmtDuration(r.duration_s)}</AppText>
+                      <AppText variant="caption" style={{ marginTop: 2 }}>
+                        {r.avg_pace || "—"} /km
+                      </AppText>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+                  </Card>
+                </Pressable>
               );
             })}
           </View>

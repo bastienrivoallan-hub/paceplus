@@ -126,6 +126,13 @@ class RunBody(BaseModel):
     distance_m: float
     duration_s: int
     route: List[dict] = []
+    splits: List[dict] = []
+    session_id: Optional[str] = None
+    avg_pace: Optional[str] = None
+
+
+class AdaptBody(BaseModel):
+    week: Optional[int] = None
     session_id: Optional[str] = None
     avg_pace: Optional[str] = None
 
@@ -365,6 +372,111 @@ Genere les {total_weeks} semaines completes."""
     return {"plan": plan_doc, "sessions_count": len(session_docs)}
 
 
+@api.post("/plan/adapt")
+async def adapt_plan(body: AdaptBody, user: dict = Depends(get_current_user)):
+    plan = await db.plans.find_one({"user_id": user["user_id"], "active": True}, {"_id": 0})
+    if not plan:
+        raise HTTPException(status_code=400, detail="Aucun plan actif")
+
+    start = datetime.strptime(plan["start_date"], "%Y-%m-%d").date()
+    monday = start - timedelta(days=start.weekday())
+    current_week = max(1, min(plan["total_weeks"], (date.today() - monday).days // 7 + 1))
+    week = body.week or current_week
+    week = max(1, min(plan["total_weeks"], week))
+
+    # Analyse past performance (all run sessions before the target week)
+    past = await db.sessions.find(
+        {"user_id": user["user_id"], "type": {"$ne": "rest"}, "week": {"$lt": week}},
+        {"_id": 0},
+    ).to_list(300)
+    done = [s for s in past if s.get("completed")]
+    missed = [s for s in past if not s.get("completed")]
+    done_types = {}
+    for s in done:
+        done_types[s["type"]] = done_types.get(s["type"], 0) + 1
+    perf = (
+        f"Séances prévues avant la semaine {week}: {len(past)}. "
+        f"Réalisées: {len(done)}. Manquées: {len(missed)}. "
+        f"Types réalisés: {done_types or 'aucun'}."
+    )
+
+    existing = await db.sessions.find(
+        {"user_id": user["user_id"], "week": week}, {"_id": 0}
+    ).sort("day_index", 1).to_list(20)
+    if not existing:
+        raise HTTPException(status_code=400, detail="Semaine introuvable")
+    date_by_day = {s["day_index"]: s["date"] for s in existing}
+
+    goal = GOAL_LABELS.get(plan["goal"], plan["goal"])
+    system = (
+        "Tu es un coach running expert. Tu ADAPTES une semaine d'entraînement en fonction "
+        "de l'assiduité récente du coureur. Réponds UNIQUEMENT en JSON valide."
+    )
+    prompt = f"""Objectif: {goal}. Niveau: {LEVEL_LABELS.get(plan['level'], plan['level'])}.
+Semaine à adapter: {week} sur {plan['total_weeks']}.
+Bilan récent: {perf}
+
+Consignes d'adaptation:
+- Si beaucoup de séances ont été manquées, allège la charge et ajoute de la récupération.
+- Si l'assiduité est bonne, maintiens une progression normale.
+- Garde exactement 7 jours (day_index 0=Lundi..6=Dimanche), ~{plan['frequency']} séances de course.
+- Types: "easy","intervals","threshold","tempo","long","recovery","rest".
+
+Réponds STRICTEMENT en JSON:
+{{
+  "coach_note": "1-2 phrases expliquant l'adaptation au coureur",
+  "days": [
+    {{"day_index":0,"type":"rest","title":"Repos","subtitle":"-","duration_min":0,"intensity":"Faible","objective":"-"}}
+  ]
+}}"""
+
+    chat = LlmChat(
+        api_key=EMERGENT_LLM_KEY,
+        session_id=f"adapt_{user['user_id']}_{uuid.uuid4().hex[:6]}",
+        system_message=system,
+    ).with_model("anthropic", "claude-sonnet-5")
+    try:
+        raw = await chat.send_message(UserMessage(text=prompt))
+        data = parse_json_block(raw)
+    except Exception as e:
+        logger.exception("adapt failed")
+        raise HTTPException(status_code=502, detail=f"Adaptation échouée: {e}")
+
+    await db.sessions.delete_many({"user_id": user["user_id"], "week": week})
+    new_sessions = []
+    for d in data.get("days", []):
+        di = int(d.get("day_index", 0))
+        stype = d.get("type", "rest")
+        new_sessions.append({
+            "session_id": new_id("sess"),
+            "user_id": user["user_id"],
+            "plan_id": plan["plan_id"],
+            "week": week,
+            "day_index": di,
+            "date": date_by_day.get(di, (monday + timedelta(weeks=week - 1, days=di)).isoformat()),
+            "week_focus": plan.get("summary", ""),
+            "type": stype,
+            "title": d.get("title", "Repos" if stype == "rest" else "Séance"),
+            "subtitle": d.get("subtitle", ""),
+            "duration_min": int(d.get("duration_min", 0) or 0),
+            "intensity": d.get("intensity", "-"),
+            "objective": d.get("objective", "-"),
+            "completed": False,
+            "completed_at": None,
+        })
+    if new_sessions:
+        await db.sessions.insert_many(new_sessions)
+
+    note = data.get("coach_note", "Semaine ajustée.")
+    await db.plans.update_one(
+        {"plan_id": plan["plan_id"]},
+        {"$set": {"last_adapt_note": note, "last_adapted_week": week}},
+    )
+    for s in new_sessions:
+        s.pop("_id", None)
+    return {"week": week, "coach_note": note, "sessions": new_sessions}
+
+
 @api.get("/plan/active")
 async def get_active_plan(user: dict = Depends(get_current_user)):
     plan = await db.plans.find_one({"user_id": user["user_id"], "active": True}, {"_id": 0})
@@ -498,6 +610,7 @@ async def save_run(body: RunBody, user: dict = Depends(get_current_user)):
         "duration_s": body.duration_s,
         "avg_pace": body.avg_pace,
         "route": body.route,
+        "splits": body.splits,
         "session_id": body.session_id,
         "created_at": now_utc().isoformat(),
     }
@@ -515,6 +628,24 @@ async def save_run(body: RunBody, user: dict = Depends(get_current_user)):
 async def list_runs(user: dict = Depends(get_current_user)):
     cur = db.runs.find({"user_id": user["user_id"]}, {"_id": 0}).sort("date", -1)
     return {"runs": await cur.to_list(100)}
+
+
+@api.get("/runs/{run_id}")
+async def get_run(run_id: str, user: dict = Depends(get_current_user)):
+    r = await db.runs.find_one({"run_id": run_id, "user_id": user["user_id"]}, {"_id": 0})
+    if not r:
+        raise HTTPException(status_code=404, detail="Course introuvable")
+    return r
+
+
+@api.get("/plan/upcoming")
+async def upcoming_sessions(user: dict = Depends(get_current_user)):
+    today = date.today().isoformat()
+    cur = db.sessions.find(
+        {"user_id": user["user_id"], "type": {"$ne": "rest"}, "date": {"$gte": today}},
+        {"_id": 0},
+    ).sort("date", 1)
+    return {"sessions": (await cur.to_list(60))[:30]}
 
 
 @api.get("/stats")

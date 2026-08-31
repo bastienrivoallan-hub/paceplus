@@ -1,0 +1,28 @@
+{
+  "summary": "Iteration 2: 3 new features (run summary, plan adapt, notification reminders) tested end-to-end. Backend 6/6 pytest tests pass (100%). Frontend flows verified on mobile viewport: Calendrier adapt-week-button triggers Claude adaptation (~10s), coach note renders in adapt-note card, week reloads with new sessions; Progression run tile (run-run_4d2a1a46548b) navigates to /run/summary/[id] which correctly displays distance/time/pace, SVG polyline route trace, and per-km splits; Profil notif-switch on web gracefully shows 'Autorise les notifications pour activer les rappels.' without crashing. No blockers.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration2_features.py",
+    "/app/test_reports/pytest/iter2_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py: /api/plan/upcoming is defined AFTER /api/sessions/{id} but they use different path prefixes (/plan/... vs /sessions/...), so no route-order collision — verified by test.",
+    "notifications.ts uses Notifications.SchedulableTriggerInputTypes.DATE which is supported by expo-notifications; graceful catch on Profile toggleNotif prevents web crash — OK.",
+    "run/summary/[id].tsx: RouteTrace SVG handles <2 point routes with fallback UI — good."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration2_features.py (created)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "None — used the pre-seeded run_4d2a1a46548b for thomas@pace.app. Test also creates a temporary run via POST /api/runs to validate splits persistence.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Auth: thomas@pace.app / secret123 (plan already active, 4 weeks). Seeded run for summary UI: run_4d2a1a46548b. Adapt endpoint takes 8-25s. Notifications are unsupported on web — the app must only show a graceful message, not crash."
+}

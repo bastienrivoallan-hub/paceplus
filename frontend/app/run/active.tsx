@@ -38,6 +38,11 @@ export default function ActiveRun() {
   const lastCoord = useRef<any>(null);
   const route = useRef<any[]>([]);
   const pausedRef = useRef(false);
+  const elapsedRef = useRef(0);
+  const distanceRef = useRef(0);
+  const nextKm = useRef(1);
+  const lastSplitElapsed = useRef(0);
+  const splits = useRef<any[]>([]);
 
   useEffect(() => {
     (async () => {
@@ -63,7 +68,10 @@ export default function ActiveRun() {
     setPaused(false);
     pausedRef.current = false;
     timer.current = setInterval(() => {
-      if (!pausedRef.current) setElapsed((e) => e + 1);
+      if (!pausedRef.current) {
+        elapsedRef.current += 1;
+        setElapsed(elapsedRef.current);
+      }
     }, 1000);
     try {
       watchSub.current = await Location.watchPositionAsync(
@@ -74,7 +82,16 @@ export default function ActiveRun() {
           route.current.push({ latitude: c.latitude, longitude: c.longitude });
           if (lastCoord.current) {
             const d = haversine(lastCoord.current, c);
-            if (d < 60) setDistance((prev) => prev + d);
+            if (d < 60) {
+              distanceRef.current += d;
+              setDistance(distanceRef.current);
+              while (distanceRef.current / 1000 >= nextKm.current) {
+                const secs = elapsedRef.current - lastSplitElapsed.current;
+                splits.current.push({ km: nextKm.current, seconds: secs, pace: formatPace(secs) });
+                lastSplitElapsed.current = elapsedRef.current;
+                nextKm.current += 1;
+              }
+            }
           }
           lastCoord.current = c;
         },
@@ -100,18 +117,19 @@ export default function ActiveRun() {
     const paceStr =
       distance > 0 ? formatPace(elapsed / (distance / 1000)) : null;
     try {
-      await api.saveRun({
+      const saved = await api.saveRun({
         distance_m: Math.round(distance),
         duration_s: elapsed,
         avg_pace: paceStr,
         route: route.current.slice(0, 500),
+        splits: splits.current,
         session_id: sessionId || null,
       });
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.replace(`/run/summary/${saved.run_id}`);
     } catch {
-      /* ignore */
+      router.replace("/(tabs)/progression");
     }
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    router.replace("/(tabs)/progression");
   };
 
   const pace = distance > 30 ? formatPace(elapsed / (distance / 1000)) : "--:--";

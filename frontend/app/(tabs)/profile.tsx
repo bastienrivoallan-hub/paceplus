@@ -1,10 +1,17 @@
-import { useState } from "react";
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
+import { useEffect, useState } from "react";
+import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 import { api } from "@/src/api";
+import { storage } from "@/src/utils/storage";
+import {
+  cancelReminders,
+  getReminderPermission,
+  requestReminderPermission,
+  scheduleSessionReminders,
+} from "@/src/notifications";
 import { useAuth } from "@/src/context/AuthContext";
 import { AppText, Card, Logo, PaceButton } from "@/src/components/ui";
 import { colors, fonts, radius, spacing } from "@/src/theme";
@@ -17,8 +24,53 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { user, logout } = useAuth();
   const [regen, setRegen] = useState(false);
-  const [notif, setNotif] = useState(true);
+  const [notif, setNotif] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+
+  const REM_KEY = "pace_reminders";
+
+  useEffect(() => {
+    (async () => {
+      const pref = await storage.getItem<boolean>(REM_KEY, false);
+      const { granted } = await getReminderPermission();
+      setNotif(!!pref && granted);
+    })();
+  }, []);
+
+  const toggleNotif = async (val: boolean) => {
+    setMsg(null);
+    if (!val) {
+      await cancelReminders();
+      await storage.setItem(REM_KEY, false);
+      setNotif(false);
+      setMsg("Rappels désactivés");
+      return;
+    }
+    try {
+      let { granted, canAskAgain } = await getReminderPermission();
+      if (!granted) {
+        const r = await requestReminderPermission();
+        granted = r.granted;
+        canAskAgain = r.canAskAgain;
+      }
+      if (!granted) {
+        setNotif(false);
+        if (!canAskAgain) {
+          setMsg("Active les notifications dans les réglages pour recevoir tes rappels.");
+        } else {
+          setMsg("Autorise les notifications pour activer les rappels.");
+        }
+        return;
+      }
+      const n = await scheduleSessionReminders();
+      await storage.setItem(REM_KEY, true);
+      setNotif(true);
+      setMsg(`Rappels activés ✅ ${n} séance${n > 1 ? "s" : ""} programmée${n > 1 ? "s" : ""}`);
+    } catch {
+      setNotif(false);
+      setMsg("Les rappels fonctionnent sur l'app mobile (Expo Go / build).");
+    }
+  };
 
   const profile = user?.profile;
   const initials = (user?.name || user?.email || "?").slice(0, 1).toUpperCase();
@@ -28,6 +80,7 @@ export default function ProfileScreen() {
     setMsg(null);
     try {
       await api.generatePlan();
+      if (notif) await scheduleSessionReminders();
       setMsg("Nouveau plan généré ✅");
     } catch (e: any) {
       setMsg(e.message || "Erreur");
@@ -93,7 +146,7 @@ export default function ProfileScreen() {
           onPress={() => router.push("/onboarding/goal")}
           style={{ marginTop: spacing.sm }}
         />
-        {msg && (
+        {msg && msg.includes("plan") && (
           <AppText testID="profile-msg" style={{ textAlign: "center", marginTop: spacing.sm, color: colors.primary }}>
             {msg}
           </AppText>
@@ -104,19 +157,36 @@ export default function ProfileScreen() {
         </AppText>
         <Card>
           <View style={styles.settingRow}>
-            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 }}>
               <Ionicons name="notifications-outline" size={20} color={colors.textSecondary} />
-              <AppText variant="bodyStrong">Rappels d'entraînement</AppText>
+              <View style={{ flex: 1 }}>
+                <AppText variant="bodyStrong">Rappels d'entraînement</AppText>
+                <AppText variant="caption" style={{ marginTop: 2 }}>
+                  La veille à 19h, avec l'allure et l'objectif
+                </AppText>
+              </View>
             </View>
             <Switch
               testID="notif-switch"
               value={notif}
-              onValueChange={setNotif}
+              onValueChange={toggleNotif}
               trackColor={{ true: colors.primary, false: colors.track }}
               thumbColor="#fff"
             />
           </View>
+          {msg && msg.includes("réglages") ? (
+            <Pressable testID="open-settings" onPress={() => Linking.openSettings()} style={{ marginTop: spacing.md }}>
+              <AppText variant="bodyStrong" style={{ color: colors.primary }}>
+                Ouvrir les réglages
+              </AppText>
+            </Pressable>
+          ) : null}
         </Card>
+        {msg && !msg.includes("plan") ? (
+          <AppText testID="notif-msg" variant="caption" style={{ marginTop: spacing.sm, marginLeft: 4, color: colors.textSecondary }}>
+            {msg}
+          </AppText>
+        ) : null}
 
         <Pressable testID="logout-button" onPress={doLogout} style={styles.logout}>
           <Ionicons name="log-out-outline" size={20} color={colors.danger} />

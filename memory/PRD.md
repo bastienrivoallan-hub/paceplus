@@ -35,11 +35,17 @@ Build a mobile Running Coach app from a Figma mockup ("PACE"). Dark/minimal desi
 - ✅ Tested: 19/19 backend pytest passed; frontend E2E verified.
 
 ## Backlog / remaining
-- P1: Real map on run tracker + route replay (react-native-maps, needs device build).
+- P1: Real map tiles on run tracker (react-native-maps, needs device build) — route trace on summary already done via SVG.
 - P1: Wearable/health data integration for real readiness metrics (currently deterministic pseudo-data).
 - P2: Streaming coach responses (SSE) instead of request/response.
 - P2: Migrate FastAPI startup/shutdown handlers to lifespan.
-- P2: Post-run summary screen with splits.
+- P2: Auto-trigger week adaptation when a new week starts (currently on-demand button + endpoint ready).
+
+## Implemented (2026-08-31 — iteration 2)
+- ✅ Résumé de course: post-run summary screen `/run/summary/[id]` with per-km splits (bars + pace) and SVG GPS route trace; run tracker now records splits; run history items open the summary. Backend: `splits` on runs, `GET /api/runs/{id}`.
+- ✅ Adaptation auto (IA): `POST /api/plan/adapt` (Claude Sonnet 5) rebuilds a week from completed/missed adherence; Calendar "Adapter avec l'IA" button + coach note card.
+- ✅ Rappels de séance: day-before (19h) local notifications via expo-notifications with pace + objective; Profil toggle with permission handling + reschedule on plan change. Backend: `GET /api/plan/upcoming`.
+- ✅ Tested: iteration 2 backend 6/6 pytest + frontend flows verified.
 
 ## Notes
 - GPS tracking requires a real device build to fully validate (limited in Expo Go / web preview).

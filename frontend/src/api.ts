@@ -57,6 +57,8 @@ export const api = {
   saveOnboarding: (body: any) => request("/profile/onboarding", { method: "PUT", body }),
   generatePlan: () => request("/plan/generate", { method: "POST" }),
   activePlan: () => request("/plan/active"),
+  adaptPlan: (week?: number) => request("/plan/adapt", { method: "POST", body: { week: week ?? null } }),
+  upcomingSessions: () => request("/plan/upcoming"),
   week: (week: number) => request(`/plan/week/${week}`),
   session: (id: string) => request(`/sessions/${id}`),
   completeSession: (id: string) => request(`/sessions/${id}/complete`, { method: "POST" }),
@@ -66,6 +68,7 @@ export const api = {
   homeToday: () => request("/home/today"),
   stats: () => request("/stats"),
   runs: () => request("/runs"),
+  run: (id: string) => request(`/runs/${id}`),
   saveRun: (body: any) => request("/runs", { method: "POST", body }),
 
   // coach + explore

@@ -19,6 +19,8 @@ export default function CalendarScreen() {
   const [week, setWeek] = useState(1);
   const [sessions, setSessions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [adapting, setAdapting] = useState(false);
+  const [adaptNote, setAdaptNote] = useState<string | null>(null);
 
   const loadWeek = useCallback(async (w: number) => {
     const res = await api.week(w);
@@ -50,6 +52,20 @@ export default function CalendarScreen() {
     if (!plan || w < 1 || w > plan.total_weeks) return;
     setWeek(w);
     await loadWeek(w);
+  };
+
+  const adapt = async () => {
+    setAdapting(true);
+    setAdaptNote(null);
+    try {
+      const res = await api.adaptPlan(week);
+      setAdaptNote(res.coach_note);
+      await loadWeek(week);
+    } catch {
+      setAdaptNote("Adaptation impossible pour le moment, réessaie.");
+    } finally {
+      setAdapting(false);
+    }
   };
 
   const toggle = async (s: any) => {
@@ -103,6 +119,26 @@ export default function CalendarScreen() {
             Semaine {week} sur {plan.total_weeks}  ·  {plan.goal_label}
             {plan.target_time ? `  —  Objectif : ${plan.target_time}` : ""}
           </AppText>
+
+          <Pressable testID="adapt-week-button" onPress={adapt} disabled={adapting} style={styles.adaptBtn}>
+            {adapting ? (
+              <ActivityIndicator color={colors.primary} size="small" />
+            ) : (
+              <Ionicons name="sparkles" size={16} color={colors.primary} />
+            )}
+            <AppText variant="bodyStrong" style={{ color: colors.primary, fontSize: 14 }}>
+              {adapting ? "Le coach adapte…" : "Adapter cette semaine avec l'IA"}
+            </AppText>
+          </Pressable>
+
+          {adaptNote && (
+            <View style={styles.noteCard} testID="adapt-note">
+              <Ionicons name="chatbubble-ellipses" size={18} color={colors.primary} style={{ marginTop: 2 }} />
+              <AppText variant="body" style={{ flex: 1, color: colors.text, fontSize: 14, lineHeight: 20 }}>
+                {adaptNote}
+              </AppText>
+            </View>
+          )}
 
           {/* Day selector */}
           <View style={styles.dayRow}>
@@ -205,6 +241,28 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
   },
   dayRow: { flexDirection: "row", justifyContent: "space-between", marginTop: spacing.xl },
+  adaptBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  noteCard: {
+    flexDirection: "row",
+    gap: spacing.md,
+    marginTop: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
   dayCol: {
     flex: 1,
     alignItems: "center",
