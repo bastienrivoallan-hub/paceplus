@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 7 fully validated. BACKEND (4/4 pytest cases green in test_iteration7_circuits.py): (1) GET /api/circuits without auth returns 401; (2) lat=99 returns 422; (3) distance_km=50 returns 422; (4) authenticated GET /api/circuits?lat=45.9&lon=6.13&distance_km=5 as thomas@pace.app returns 200 with 3 circuits — ids ors0/ors1/ors2, source='openrouteservice', color hex, seed int, duration_min>0, distance_km inside 0.4x-2.2x band, coords list length>=2, and Haversine check on first+last vs start<300m (loop). FRONTEND (mobile viewport 390x844) with geolocation granted at 45.9/6.13: Profile → 'MONTRES CONNECTÉES' — sync-apple-health button ABSENT on web (bug fix confirmed), 'Disponible sur iPhone (après build de l'app)' caption present, no watch-msg error surfaced, no crash. /routes-map screen — circuit-ors0/ors1/ors2 cards rendered with real distances '5.5 km · ~33 min', circuits-source badge shows 'Routes réelles' (green check), selecting a circuit highlights it (border color changes), run-circuit button labelled 'Courir ce circuit (5.5 km · ~33 min)'. Regression — Explore 'open-circuits-map' navigates to /routes-map; /run/active still shows zombie-toggle. No red-screen errors, no ORS 502s hit, only benign expo-notifications warnings on web. Code review of src/health.ts confirms isExpoGo export (Constants.appOwnership==='expo' OR executionEnvironment==='storeClient') and HealthConnectResult.reason typed union covering ok/expo_go/not_ios/module_missing/unavailable/denied_or_error; profile.tsx HEALTH_MESSAGES map covers all 5 non-ok reasons with clear French guidance. Native iOS path untestable in web preview per brief.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration7_circuits.py",
+    "/app/test_reports/pytest/iter7_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~1370 lines — extracting the ORS circuits + watch-workouts routers would improve maintainability, though no functional impact.",
+    "In /api/circuits, `random.sample(range(1,100000), 5)` fires 5 ORS calls per request; if quota pressure grows, consider dropping to 3 seeds (the endpoint already keeps only ok[:3]).",
+    "profile.tsx still uses `msg.includes('plan')` / `msg.includes('réglages')` string-sniffing for message routing (pre-existing) — brittle if copy changes.",
+    "circuits response: `duration_min` is derived from a fixed 6:00/km pace on the server; the ORS-returned `duration_s` (walking pace) is discarded. Fine for a running estimate but worth documenting."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration7_circuits.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "No persistent seed data created — /api/circuits is read-only (ORS proxy).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend URL env is EXPO_PUBLIC_BACKEND_URL (fallback to hardcoded preview URL in test file). Login testIDs on /auth are auth-email-input / auth-password-input / auth-submit-button (NOT login-email/login-password). ORS free tier is 40 req/min and each /api/circuits fans out 5 ORS calls — keep circuit generations under 4 per test run and space them out. The circuits endpoint at 45.9/6.13 (Annecy) reliably returns 3 loops around 5-6 km even when 8 km is requested (ORS honours the 0.4x-2.2x server band). Iteration 7 backend regression baseline at /app/backend/tests/test_iteration7_circuits.py.",
+  "rca_of_issue": "N/A — feature verification only, no bugs found. Apple Watch web bug fix: appleHealthSupported=false on web ⇒ Pressable sync button not rendered and caption switches to 'Disponible sur iPhone (après build de l'app)' — no HealthKit call, no error message. Reason-code typing in HealthConnectResult forces exhaustive HEALTH_MESSAGES map in profile.tsx (verified statically)."
+}

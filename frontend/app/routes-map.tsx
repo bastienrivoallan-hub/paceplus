@@ -6,6 +6,7 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 
 import { AppText, PaceButton } from "@/src/components/ui";
+import { api } from "@/src/api";
 import CircuitsMap from "@/src/components/CircuitsMap";
 import { Circuit, Coord, generateCircuits } from "@/src/circuits";
 import { colors, fonts, radius, spacing } from "@/src/theme";
@@ -23,6 +24,28 @@ export default function RoutesMapScreen() {
   const [distance, setDistance] = useState(5);
   const [circuits, setCircuits] = useState<Circuit[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  const [generating, setGenerating] = useState(false);
+  const [realRoads, setRealRoads] = useState(false);
+
+  const generateFor = useCallback(async (c: Coord, dist: number) => {
+    setGenerating(true);
+    try {
+      const res: any = await api.circuits(c.latitude, c.longitude, dist);
+      const cs: Circuit[] = res.circuits || [];
+      if (!cs.length) throw new Error("empty");
+      setCircuits(cs);
+      setSelected(cs[0].id);
+      setRealRoads(true);
+    } catch {
+      // Fallback: local geometric loops when the routing service is unavailable
+      const cs = generateCircuits(c, dist);
+      setCircuits(cs);
+      setSelected(cs[0].id);
+      setRealRoads(false);
+    } finally {
+      setGenerating(false);
+    }
+  }, []);
 
   const locate = useCallback(async (dist: number) => {
     setLocating(true);
@@ -32,16 +55,14 @@ export default function RoutesMapScreen() {
       if (p) {
         const c = { latitude: p.coords.latitude, longitude: p.coords.longitude };
         setPos(c);
-        const cs = generateCircuits(c, dist);
-        setCircuits(cs);
-        setSelected(cs[0].id);
+        await generateFor(c, dist);
       }
     } catch {
       /* ignore */
     } finally {
       setLocating(false);
     }
-  }, []);
+  }, [generateFor]);
 
   useEffect(() => {
     (async () => {
@@ -69,15 +90,13 @@ export default function RoutesMapScreen() {
 
   const regenerate = (d: number) => {
     setDistance(d);
-    if (pos) {
-      const cs = generateCircuits(pos, d);
-      setCircuits(cs);
-      setSelected(cs[0].id);
-    }
+    if (pos) generateFor(pos, d);
   };
 
   const selectedCircuit = circuits.find((c) => c.id === selected);
-  const estMin = selectedCircuit ? Math.round(selectedCircuit.distance_km * 6) : 0;
+  const estMin = selectedCircuit
+    ? (selectedCircuit as any).duration_min || Math.round(selectedCircuit.distance_km * 6)
+    : 0;
 
   // Permission gate
   if (perm !== "granted") {
@@ -156,7 +175,24 @@ export default function RoutesMapScreen() {
       {/* Map */}
       <View style={{ flex: 1, marginHorizontal: spacing.xl, borderRadius: radius.lg, overflow: "hidden" }}>
         {pos ? (
-          <CircuitsMap start={pos} circuits={circuits} selectedId={selected} />
+          <>
+            <CircuitsMap start={pos} circuits={circuits} selectedId={selected} />
+            {generating ? (
+              <View style={styles.genOverlay} testID="circuits-generating">
+                <ActivityIndicator color={colors.primary} />
+                <AppText variant="caption" style={{ marginTop: spacing.sm }}>
+                  Recherche de vraies routes autour de toi…
+                </AppText>
+              </View>
+            ) : circuits.length > 0 ? (
+              <View style={styles.sourceBadge} testID="circuits-source">
+                <Ionicons name={realRoads ? "checkmark-circle" : "alert-circle-outline"} size={13} color={realRoads ? colors.primary : colors.orange} />
+                <AppText variant="caption" style={{ fontSize: 11, color: realRoads ? colors.primary : colors.orange }}>
+                  {realRoads ? "Routes réelles" : "Tracé approximatif"}
+                </AppText>
+              </View>
+            ) : null}
+          </>
         ) : (
           <View style={[styles.center, { backgroundColor: colors.card }]}>
             <ActivityIndicator color={colors.primary} />
@@ -197,7 +233,7 @@ export default function RoutesMapScreen() {
                   <AppText variant="bodyStrong">{c.name}</AppText>
                 </View>
                 <AppText variant="caption" style={{ marginTop: 4 }}>
-                  {c.distance_km} km · ~{Math.round(c.distance_km * 6)} min
+                  {c.distance_km} km · ~{(c as any).duration_min || Math.round(c.distance_km * 6)} min
                 </AppText>
               </Pressable>
             );
@@ -262,4 +298,22 @@ const styles = StyleSheet.create({
     minWidth: 150,
   },
   colorDot: { width: 10, height: 10, borderRadius: 5 },
+  genOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(10,10,12,0.72)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sourceBadge: {
+    position: "absolute",
+    top: spacing.md,
+    left: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(10,10,12,0.8)",
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 5,
+  },
 });

@@ -15,7 +15,8 @@
         "NSLocationWhenInUseUsageDescription": "Suivi GPS de tes courses en temps réel",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Suit ta course même écran verrouillé",
         "UIBackgroundModes": [
-          "location"
+          "location",
+          "audio"
         ]
       }
     },
@@ -43,6 +44,14 @@
       "expo-router",
       "expo-notifications",
       [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "Importer tes courses et ta fréquence cardiaque Apple Watch",
+          "NSHealthUpdateUsageDescription": "PACE n'écrit aucune donnée de santé",
+          "background": false
+        }
+      ],
+      [
         "expo-location",
         {
           "locationWhenInUsePermission": "Suivi GPS de tes courses en temps réel",
@@ -59,7 +68,9 @@
           "resizeMode": "contain",
           "backgroundColor": "#000000"
         }
-      ]
+      ],
+      "expo-audio",
+      "@kingstinct/react-native-healthkit"
     ],
     "experiments": {
       "typedRoutes": true

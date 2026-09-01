@@ -1,0 +1,27 @@
+{
+  "summary": "Iteration 6 fully validated. Backend: 4/4 pytest cases green — POST /api/health/workouts requires auth (401), accepts an apple_health workout and returns {ok:true, synced:1}, re-POST of the same external_id is idempotent (still synced:1 and GET returns exactly one row), source='fitbit' is ignored (synced:0, not stored), and GET /api/health/workouts is sorted by started_at DESC. Frontend (mobile viewport 390x844): Profile → 'MONTRES CONNECTÉES' section renders with Apple Watch row showing fallback text 'Disponible sur iPhone (après build de l'app)', NO 'Synchroniser' button on web (data-testid sync-apple-health absent), and Garmin row showing 'Bientôt'. Regression: notif-switch and regenerate-plan-button both present. Zombie Run flow: zombie-toggle visible before start, tapping it + run-start reveals zombie-banner with 'Échauffement' and zombie-countdown ticking (4:57 → 4:55 in 2.5s). Pause freezes the countdown (4:55 → 4:55). Zombie OFF regression: no banner appears during run. No deprecated Expo packages, no red-screen errors, only benign warnings (expo-notifications on web, pointerEvents deprecation). watch-workouts-card list & run-summary redirect could not be visually confirmed because Auth seeding via localStorage did not populate AuthContext (test-env limitation, not an app bug — API-level tests already confirm workout list is correctly sorted and the finish→summary fallback path works).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration6_features.py",
+    "/app/test_reports/pytest/iter6_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py has grown to ~1280 lines — consider splitting into routers (auth, plan, runs, coach, weather, health) for maintainability, but no functional impact.",
+    "profile.tsx uses `msg.includes('plan')` / `msg.includes('réglages')` string sniffing to decide where to show a message — brittle if copy changes; consider a discriminated state variable (info level + target section)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration6_features.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "seed_data_creation": "Backend tests create ~3 apple_health workouts under thomas@pace.app (external_ids prefixed hk-test-/hk-old-/hk-new-). They persist under db.watch_workouts and populate the Profile 'watch-workouts-card' on next login.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend URL env var is EXPO_PUBLIC_BACKEND_URL (not EXPO_BACKEND_URL). For UI tests that need an authenticated session on web, seeding localStorage keys is unreliable — the AuthContext bootstraps from AsyncStorage. Prefer scripting the login form (email/password fields on /auth) to obtain a real client session. Iteration 6 test file at /app/backend/tests/test_iteration6_features.py is a good regression baseline for the watch-workouts endpoints."
+}

@@ -14,6 +14,7 @@ import {
   stopBackgroundRunTracking,
 } from "@/src/backgroundLocation";
 import { storage } from "@/src/utils/storage";
+import { buildZombiePlan, zombieEngine, ZombieInfo } from "@/src/workoutAudio";
 import { api } from "@/src/api";
 import { AppText, PaceButton } from "@/src/components/ui";
 import RunMap from "@/src/components/RunMap";
@@ -46,6 +47,10 @@ export default function ActiveRun() {
   const [showSos, setShowSos] = useState(false);
   const [showBgAsk, setShowBgAsk] = useState(false);
   const [bgActive, setBgActive] = useState(false);
+  const [zombieMode, setZombieMode] = useState(false);
+  const [zombieInfo, setZombieInfo] = useState<ZombieInfo | null>(null);
+  const zombieRef = useRef(false);
+  const durationMin = useRef(30);
 
   const watchSub = useRef<Location.LocationSubscription | null>(null);
   const timer = useRef<any>(null);
@@ -68,12 +73,18 @@ export default function ActiveRun() {
       setCanAskAgain(p.canAskAgain);
       if (!p.granted && p.status === "undetermined") setPerm("undetermined");
     })();
+    if (sessionId) {
+      api.session(String(sessionId)).then((s: any) => {
+        if (s?.duration_min > 0) durationMin.current = s.duration_min;
+      }).catch(() => {});
+    }
     return () => {
       try { if (watchSub.current) watchSub.current.remove(); } catch { /* ignore */ }
       if (timer.current) clearInterval(timer.current);
       try { stopBackgroundRunTracking(); } catch { /* ignore */ }
+      zombieEngine.stop();
     };
-  }, []);
+  }, [sessionId]);
 
   const askPermission = async () => {
     const p = await Location.requestForegroundPermissionsAsync();
@@ -135,10 +146,15 @@ export default function ActiveRun() {
     // Wall-clock timing so the chrono stays exact even when the phone is locked
     startTs.current = Date.now();
     pausedAccum.current = 0;
+    zombieRef.current = zombieMode;
+    if (zombieMode) {
+      await zombieEngine.start(buildZombiePlan(durationMin.current));
+    }
     timer.current = setInterval(() => {
       if (!pausedRef.current) {
         elapsedRef.current = Math.max(0, Math.floor((Date.now() - startTs.current - pausedAccum.current) / 1000));
         setElapsed(elapsedRef.current);
+        if (zombieRef.current) setZombieInfo(zombieEngine.tick(elapsedRef.current));
       }
     }, 500);
 
@@ -177,6 +193,7 @@ export default function ActiveRun() {
     if (timer.current) clearInterval(timer.current);
     try { if (watchSub.current) watchSub.current.remove(); } catch { /* expo-location on web can throw */ }
     try { await stopBackgroundRunTracking(); } catch { /* ignore */ }
+    zombieEngine.stop();
     setSaving(true);
     const paceStr =
       distance > 0 ? formatPace(elapsed / (distance / 1000)) : null;
@@ -259,6 +276,23 @@ export default function ActiveRun() {
       </View>
 
       <View style={{ flex: 1, paddingHorizontal: spacing.xl }}>
+        {running && zombieInfo ? (
+          <View style={[styles.zombieBanner, { borderColor: `${zombieInfo.color}88`, backgroundColor: `${zombieInfo.color}1A` }]} testID="zombie-banner">
+            <View style={{ flex: 1 }}>
+              <AppText style={{ fontFamily: fonts.displayBold, fontSize: 17, color: zombieInfo.color }}>
+                {zombieInfo.title}
+              </AppText>
+              <AppText variant="caption" style={{ marginTop: 2 }}>
+                {zombieInfo.subtitle}
+              </AppText>
+            </View>
+            {zombieInfo.kind !== "done" ? (
+              <AppText style={{ fontFamily: fonts.displayBold, fontSize: 24, color: zombieInfo.color }} testID="zombie-countdown">
+                {Math.floor(zombieInfo.remaining_s / 60)}:{String(zombieInfo.remaining_s % 60).padStart(2, "0")}
+              </AppText>
+            ) : null}
+          </View>
+        ) : null}
         {running && routeState.length > 1 ? (
           <RunMap route={routeState} current={currentCoord} follow height={190} style={{ marginBottom: spacing.lg }} />
         ) : null}
@@ -285,7 +319,29 @@ export default function ActiveRun() {
 
       <View style={{ paddingHorizontal: spacing.xl, paddingBottom: insets.bottom + spacing.xl, gap: spacing.md }}>
         {!running ? (
-          <PaceButton testID="run-start" label="Démarrer" icon="play" onPress={onStartPress} />
+          <>
+            <Pressable
+              testID="zombie-toggle"
+              onPress={() => setZombieMode((v) => !v)}
+              style={[styles.zombieToggle, zombieMode && { borderColor: colors.danger, backgroundColor: "rgba(239,91,123,0.10)" }]}
+            >
+              <AppText style={{ fontSize: 22 }}>🧟</AppText>
+              <View style={{ flex: 1 }}>
+                <AppText variant="bodyStrong" style={zombieMode ? { color: colors.danger } : undefined}>
+                  Mode Zombie Run
+                </AppText>
+                <AppText variant="caption" style={{ marginTop: 1 }}>
+                  Fractionné immersif : fuis la horde pendant les sprints, ta musique baisse pendant les alertes
+                </AppText>
+              </View>
+              <Ionicons
+                name={zombieMode ? "checkmark-circle" : "ellipse-outline"}
+                size={24}
+                color={zombieMode ? colors.danger : colors.textMuted}
+              />
+            </Pressable>
+            <PaceButton testID="run-start" label="Démarrer" icon="play" onPress={onStartPress} />
+          </>
         ) : (
           <View style={{ flexDirection: "row", gap: spacing.md }}>
             <PaceButton
@@ -483,4 +539,24 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
   },
   vline: { width: 1, height: 36, backgroundColor: colors.border },
+  zombieBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    borderWidth: 1.5,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  zombieToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    backgroundColor: colors.card,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
+    borderColor: colors.border,
+    padding: spacing.lg,
+    minHeight: 48,
+  },
 });

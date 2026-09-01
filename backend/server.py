@@ -2,6 +2,8 @@ import os
 import re
 import json
 import uuid
+import random
+import asyncio
 import hashlib
 import logging
 from pathlib import Path
@@ -25,6 +27,7 @@ mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
+ORS_API_KEY = os.environ.get("ORS_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pace")
@@ -147,6 +150,22 @@ class RaceLocationBody(BaseModel):
     city: str
     lat: float
     lon: float
+
+
+class WatchWorkoutBody(BaseModel):
+    external_id: str
+    source: str  # "apple_health" | "garmin"
+    started_at: str
+    ended_at: Optional[str] = None
+    duration_s: int = 0
+    distance_m: Optional[float] = None
+    calories_kcal: Optional[float] = None
+    avg_hr_bpm: Optional[float] = None
+    max_hr_bpm: Optional[float] = None
+
+
+class WatchSyncBody(BaseModel):
+    workouts: List[WatchWorkoutBody] = []
 
 
 # ----------------------------- auth -------------------------------------------
@@ -1207,6 +1226,120 @@ Réponds UNIQUEMENT en JSON: {{"route_id": "...", "reason": "2-3 phrases en fran
     return out
 
 
+# ----------------------------- connected watches ------------------------------
+
+@api.post("/health/workouts")
+async def sync_watch_workouts(body: WatchSyncBody, user: dict = Depends(get_current_user)):
+    count = 0
+    for w in body.workouts[:100]:
+        if w.source not in ("apple_health", "garmin"):
+            continue
+        doc = w.model_dump()
+        doc["user_id"] = user["user_id"]
+        doc["synced_at"] = now_utc().isoformat()
+        await db.watch_workouts.update_one(
+            {"user_id": user["user_id"], "source": w.source, "external_id": w.external_id},
+            {"$set": doc},
+            upsert=True,
+        )
+        count += 1
+    return {"ok": True, "synced": count}
+
+
+@api.get("/health/workouts")
+async def list_watch_workouts(user: dict = Depends(get_current_user)):
+    items = await db.watch_workouts.find({"user_id": user["user_id"]}, {"_id": 0}).sort("started_at", -1).to_list(30)
+    return {"workouts": items}
+
+
+# ----------------------------- real-road circuits (OpenRouteService) ----------
+
+CIRCUIT_STYLES = [
+    {"name": "Boucle Nord", "color": "#5FD86E"},
+    {"name": "Boucle Est", "color": "#5B8DEF"},
+    {"name": "Boucle Ouest", "color": "#E8A13C"},
+]
+
+
+async def ors_round_trip(hc: httpx.AsyncClient, lat: float, lon: float, target_m: int, seed: int):
+    body = {
+        "coordinates": [[lon, lat]],  # ORS = [lon, lat]
+        "instructions": False,
+        "options": {"round_trip": {"length": target_m, "points": 4, "seed": seed}},
+    }
+    r = await hc.post(
+        "https://api.openrouteservice.org/v2/directions/foot-walking/geojson",
+        headers={"Authorization": ORS_API_KEY, "Content-Type": "application/json"},
+        json=body,
+    )
+    r.raise_for_status()
+    feat = r.json()["features"][0]
+    geom = feat["geometry"]
+    if geom.get("type") != "LineString" or len(geom.get("coordinates", [])) < 2:
+        raise ValueError("invalid geometry")
+    coords = geom["coordinates"]
+    # Cap payload size while keeping the route shape
+    stride = max(1, len(coords) // 300)
+    pts = [{"latitude": c[1], "longitude": c[0]} for c in coords[::stride]]
+    if pts[-1] != {"latitude": coords[-1][1], "longitude": coords[-1][0]}:
+        pts.append({"latitude": coords[-1][1], "longitude": coords[-1][0]})
+    summary = feat["properties"]["summary"]
+    return {
+        "seed": seed,
+        "distance_m": float(summary["distance"]),
+        "duration_s": float(summary["duration"]),
+        "coords": pts,
+    }
+
+
+@api.get("/circuits")
+async def real_circuits(
+    lat: float,
+    lon: float,
+    distance_km: float = 5,
+    user: dict = Depends(get_current_user),
+):
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        raise HTTPException(status_code=422, detail="Coordonnées invalides")
+    if not (1 <= distance_km <= 30):
+        raise HTTPException(status_code=422, detail="Distance entre 1 et 30 km")
+    if not ORS_API_KEY:
+        raise HTTPException(status_code=503, detail="Service de circuits non configuré")
+
+    target_m = int(distance_km * 1000)
+    seeds = random.sample(range(1, 100000), 5)
+    async with httpx.AsyncClient(timeout=25) as hc:
+        results = await asyncio.gather(
+            *(ors_round_trip(hc, lat, lon, target_m, s) for s in seeds),
+            return_exceptions=True,
+        )
+
+    ok = [r for r in results if not isinstance(r, Exception)]
+    for r in results:
+        if isinstance(r, Exception):
+            logger.warning("ORS circuit failed: %s", r)
+    # Keep the routes closest to the requested distance, drop extreme outliers
+    ok = [r for r in ok if target_m * 0.4 <= r["distance_m"] <= target_m * 2.2]
+    ok.sort(key=lambda r: abs(r["distance_m"] - target_m))
+    circuits = []
+    for i, res in enumerate(ok[:3]):
+        style = CIRCUIT_STYLES[i % len(CIRCUIT_STYLES)]
+        km = res["distance_m"] / 1000
+        circuits.append({
+            "id": f"ors{i}",
+            "name": style["name"],
+            "color": style["color"],
+            "distance_km": round(km, 1),
+            "duration_min": round(km * 6),  # running estimate at 6:00/km
+            "seed": res["seed"],
+            "coords": res["coords"],
+            "source": "openrouteservice",
+        })
+    if not circuits:
+        raise HTTPException(status_code=502, detail="Impossible de générer des circuits ici. Réessaie.")
+    return {"circuits": circuits}
+
+
 # ----------------------------- startup ----------------------------------------
 
 @app.on_event("startup")
@@ -1217,6 +1350,7 @@ async def startup():
     await db.user_sessions.create_index("user_id")
     await db.sessions.create_index([("user_id", 1), ("week", 1)])
     await db.runs.create_index([("user_id", 1), ("date", -1)])
+    await db.watch_workouts.create_index([("user_id", 1), ("source", 1), ("external_id", 1)], unique=True)
     logger.info("PACE API started")
 
 

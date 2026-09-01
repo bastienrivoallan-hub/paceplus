@@ -95,10 +95,16 @@ export const api = {
   weather: (lat: number, lon: number) => request(`/weather?lat=${lat}&lon=${lon}`),
   routes: () => request("/routes"),
   routeWeather: (lat: number, lon: number) => request(`/coach/route-weather?lat=${lat}&lon=${lon}`),
+  circuits: (lat: number, lon: number, distanceKm: number) =>
+    request(`/circuits?lat=${lat}&lon=${lon}&distance_km=${distanceKm}`),
 
   // race weather
   geoSearch: (q: string) => request(`/geo/search?q=${encodeURIComponent(q)}`),
   saveRaceLocation: (city: string, lat: number, lon: number) =>
     request("/profile/race-location", { method: "PUT", body: { city, lat, lon } }),
   raceWeather: () => request("/race/weather"),
+
+  // connected watches
+  syncWatchWorkouts: (workouts: any[]) => request("/health/workouts", { method: "POST", body: { workouts } }),
+  watchWorkouts: () => request("/health/workouts"),
 };

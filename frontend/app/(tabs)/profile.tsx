@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Switch, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -13,6 +13,7 @@ import {
   scheduleSessionReminders,
 } from "@/src/notifications";
 import { useAuth } from "@/src/context/AuthContext";
+import { appleHealthSupported, connectAppleHealth, fetchAppleWatchRuns, isExpoGo, WatchWorkout } from "@/src/health";
 import { AppText, Card, Logo, PaceButton } from "@/src/components/ui";
 import { colors, fonts, radius, spacing } from "@/src/theme";
 
@@ -26,6 +27,9 @@ export default function ProfileScreen() {
   const [regen, setRegen] = useState(false);
   const [notif, setNotif] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [watchMsg, setWatchMsg] = useState<string | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [watchWorkouts, setWatchWorkouts] = useState<WatchWorkout[]>([]);
 
   const REM_KEY = "pace_reminders";
 
@@ -35,7 +39,41 @@ export default function ProfileScreen() {
       const { granted } = await getReminderPermission();
       setNotif(!!pref && granted);
     })();
+    api.watchWorkouts().then((r: any) => setWatchWorkouts(r.workouts || [])).catch(() => {});
   }, []);
+
+  const HEALTH_MESSAGES: Record<string, string> = {
+    expo_go: "Apple Santé ne fonctionne pas dans Expo Go. Génère le build iOS (bouton Publish en haut à droite), installe l'app, puis réessaie.",
+    not_ios: "Apple Santé est disponible uniquement sur iPhone.",
+    module_missing: "Ce build ne contient pas encore Apple Santé : régénère un build iOS depuis Publish.",
+    unavailable: "Apple Santé n'est pas disponible sur cet appareil.",
+    denied_or_error: "Accès refusé ou incomplet. Va dans Réglages → Santé → Accès aux données → PACE et active la lecture.",
+  };
+
+  const syncAppleHealth = async () => {
+    setSyncing(true);
+    setWatchMsg(null);
+    try {
+      const { authorized, reason } = await connectAppleHealth();
+      if (!authorized) {
+        setWatchMsg(HEALTH_MESSAGES[reason] || "Connexion à Apple Santé impossible.");
+        return;
+      }
+      const runs = await fetchAppleWatchRuns(30);
+      if (!runs.length) {
+        setWatchMsg("Aucune course trouvée sur les 30 derniers jours. Vérifie aussi Réglages → Santé → Accès aux données.");
+        return;
+      }
+      const res: any = await api.syncWatchWorkouts(runs);
+      const r: any = await api.watchWorkouts();
+      setWatchWorkouts(r.workouts || []);
+      setWatchMsg(`✅ ${res.synced} entraînement${res.synced > 1 ? "s" : ""} importé${res.synced > 1 ? "s" : ""} depuis Apple Santé`);
+    } catch (e: any) {
+      setWatchMsg(e?.message || "Erreur de synchronisation");
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const toggleNotif = async (val: boolean) => {
     setMsg(null);
@@ -153,6 +191,77 @@ export default function ProfileScreen() {
         )}
 
         <AppText variant="label" style={{ marginTop: spacing.xl, marginBottom: spacing.md, marginLeft: 4 }}>
+          MONTRES CONNECTÉES
+        </AppText>
+        <Card>
+          <View style={styles.settingRow}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 }}>
+              <Ionicons name="watch-outline" size={20} color={colors.textSecondary} />
+              <View style={{ flex: 1 }}>
+                <AppText variant="bodyStrong">Apple Watch (Apple Santé)</AppText>
+                <AppText variant="caption" style={{ marginTop: 2 }}>
+                  {!appleHealthSupported
+                    ? "Disponible sur iPhone (après build de l'app)"
+                    : isExpoGo
+                      ? "Nécessite le build iOS (Publish) — indisponible dans Expo Go"
+                      : "Importe tes courses : FC, distance, calories"}
+                </AppText>
+              </View>
+            </View>
+            {appleHealthSupported ? (
+              <Pressable testID="sync-apple-health" onPress={syncAppleHealth} disabled={syncing} style={styles.syncBtn}>
+                {syncing ? (
+                  <ActivityIndicator size="small" color="#07240D" />
+                ) : (
+                  <AppText style={{ fontFamily: fonts.semibold, fontSize: 13, color: "#07240D" }}>Synchroniser</AppText>
+                )}
+              </Pressable>
+            ) : null}
+          </View>
+          <Divider />
+          <View style={[styles.settingRow, { marginTop: spacing.md }]}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 }}>
+              <Ionicons name="watch-outline" size={20} color={colors.textMuted} />
+              <View style={{ flex: 1 }}>
+                <AppText variant="bodyStrong" style={{ color: colors.textSecondary }}>Garmin Connect</AppText>
+                <AppText variant="caption" style={{ marginTop: 2 }}>
+                  Bientôt — nécessite tes clés API Garmin
+                </AppText>
+              </View>
+            </View>
+          </View>
+        </Card>
+        {watchMsg ? (
+          <AppText testID="watch-msg" variant="caption" style={{ marginTop: spacing.sm, marginLeft: 4, color: colors.textSecondary }}>
+            {watchMsg}
+          </AppText>
+        ) : null}
+        {watchWorkouts.length > 0 && (
+          <Card style={{ marginTop: spacing.md }} testID="watch-workouts-card">
+            <AppText variant="label" style={{ marginBottom: spacing.sm }}>
+              DERNIERS IMPORTS MONTRE
+            </AppText>
+            {watchWorkouts.slice(0, 5).map((w) => (
+              <View key={`${w.source}-${w.external_id}`} style={styles.watchRow}>
+                <Ionicons name="heart" size={16} color={colors.pink} />
+                <View style={{ flex: 1 }}>
+                  <AppText variant="bodyStrong" style={{ fontSize: 14 }}>
+                    {w.distance_m != null ? `${(w.distance_m / 1000).toFixed(1)} km` : "Course"} ·{" "}
+                    {Math.round((w.duration_s || 0) / 60)} min
+                  </AppText>
+                  <AppText variant="caption" style={{ marginTop: 1 }}>
+                    {new Date(w.started_at).toLocaleDateString("fr-FR")}
+                    {w.avg_hr_bpm ? ` · FC moy ${w.avg_hr_bpm}` : ""}
+                    {w.max_hr_bpm ? ` · max ${w.max_hr_bpm} bpm` : ""}
+                    {w.calories_kcal ? ` · ${Math.round(w.calories_kcal)} kcal` : ""}
+                  </AppText>
+                </View>
+              </View>
+            ))}
+          </Card>
+        )}
+
+        <AppText variant="label" style={{ marginTop: spacing.xl, marginBottom: spacing.md, marginLeft: 4 }}>
           PRÉFÉRENCES
         </AppText>
         <Card>
@@ -160,9 +269,9 @@ export default function ProfileScreen() {
             <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md, flex: 1 }}>
               <Ionicons name="notifications-outline" size={20} color={colors.textSecondary} />
               <View style={{ flex: 1 }}>
-                <AppText variant="bodyStrong">Rappels d'entraînement</AppText>
+                <AppText variant="bodyStrong">Rappels d&apos;entraînement</AppText>
                 <AppText variant="caption" style={{ marginTop: 2 }}>
-                  La veille à 19h, avec l'allure et l'objectif
+                  La veille à 19h, avec l&apos;allure et l&apos;objectif
                 </AppText>
               </View>
             </View>
@@ -244,6 +353,20 @@ const styles = StyleSheet.create({
   },
   infoRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: spacing.md },
   settingRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  syncBtn: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 8,
+    minWidth: 108,
+    alignItems: "center",
+  },
+  watchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.sm,
+  },
   logout: {
     flexDirection: "row",
     alignItems: "center",
