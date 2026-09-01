@@ -12,7 +12,11 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.emergent.runningcoachapp.twnqmf",
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Suivi GPS de tes courses en temps réel"
+        "NSLocationWhenInUseUsageDescription": "Suivi GPS de tes courses en temps réel",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Suit ta course même écran verrouillé",
+        "UIBackgroundModes": [
+          "location"
+        ]
       }
     },
     "android": {
@@ -24,7 +28,10 @@
       "package": "com.emergent.runningcoachapp.twnqmf",
       "permissions": [
         "ACCESS_FINE_LOCATION",
-        "ACCESS_COARSE_LOCATION"
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -38,7 +45,10 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Suivi GPS de tes courses en temps réel"
+          "locationWhenInUsePermission": "Suivi GPS de tes courses en temps réel",
+          "locationAlwaysAndWhenInUsePermission": "Suit ta course même écran verrouillé",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [

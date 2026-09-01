@@ -324,7 +324,7 @@ Genere les {total_weeks} semaines completes."""
         data = parse_json_block(raw)
     except Exception as e:
         logger.exception("plan generation failed")
-        raise HTTPException(status_code=502, detail=f"Generation du plan echouee: {e}")
+        raise HTTPException(status_code=502, detail="Génération du plan échouée. Réessaie dans un instant.")
 
     plan_id = new_id("plan")
     await db.plans.update_many({"user_id": user["user_id"]}, {"$set": {"active": False}})
@@ -448,7 +448,7 @@ Réponds STRICTEMENT en JSON:
         data = parse_json_block(raw)
     except Exception as e:
         logger.exception("adapt failed")
-        raise HTTPException(status_code=502, detail=f"Adaptation échouée: {e}")
+        raise HTTPException(status_code=502, detail="Adaptation échouée. Réessaie dans un instant.")
 
     await db.sessions.delete_many({"user_id": user["user_id"], "week": week})
     new_sessions = []
@@ -723,7 +723,7 @@ async def coach_chat(body: CoachBody, user: dict = Depends(get_current_user)):
         reply = await chat.send_message(UserMessage(text=body.message))
     except Exception as e:
         logger.exception("coach chat failed")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail="Le coach est momentanément indisponible. Réessaie dans un instant.")
 
     await db.coach_messages.insert_one({
         "user_id": user["user_id"], "role": "assistant",
@@ -890,7 +890,7 @@ Donne un feedback en français (4-6 phrases): régularité de l'allure, points f
         analysis = await _claude(user["user_id"], "runan", system).send_message(UserMessage(text=prompt))
     except Exception as e:
         logger.exception("run analysis failed")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail="Le coach est momentanément indisponible. Réessaie dans un instant.")
 
     await db.runs.update_one({"run_id": body.run_id}, {"$set": {"analysis": analysis}})
     return {"analysis": analysis}
@@ -926,7 +926,7 @@ Rédige un débrief en français (5-7 phrases): bilan de l'assiduité, ce qui a 
         debrief = await _claude(user["user_id"], "debrief", system).send_message(UserMessage(text=prompt))
     except Exception as e:
         logger.exception("debrief failed")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail="Le coach est momentanément indisponible. Réessaie dans un instant.")
 
     await db.debriefs.insert_one({
         "user_id": user["user_id"], "plan_id": plan["plan_id"], "week": week,
@@ -965,7 +965,7 @@ Donne des conseils de nutrition et d'hydratation en français, en 3 parties cour
         advice = await _claude(user["user_id"], "nutri", system).send_message(UserMessage(text=prompt))
     except Exception as e:
         logger.exception("nutrition failed")
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail="Le coach est momentanément indisponible. Réessaie dans un instant.")
     return {"session_title": session["title"], "advice": advice}
 
 

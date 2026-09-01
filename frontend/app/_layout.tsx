@@ -11,6 +11,8 @@ import { StatusBar } from "expo-status-bar";
 import { useIconFonts } from "@/src/hooks/use-icon-fonts";
 import { AuthProvider } from "@/src/context/AuthContext";
 import { colors } from "@/src/theme";
+// Registers the background run-tracking task at app startup.
+import "@/src/backgroundLocation";
 
 LogBox.ignoreAllLogs(true);
 

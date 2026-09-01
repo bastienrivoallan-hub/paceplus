@@ -6,6 +6,14 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 
+import {
+  getBackgroundPermission,
+  requestBackgroundPermission,
+  setRunPointListener,
+  startBackgroundRunTracking,
+  stopBackgroundRunTracking,
+} from "@/src/backgroundLocation";
+import { storage } from "@/src/utils/storage";
 import { api } from "@/src/api";
 import { AppText, PaceButton } from "@/src/components/ui";
 import RunMap from "@/src/components/RunMap";
@@ -36,6 +44,8 @@ export default function ActiveRun() {
   const [routeState, setRouteState] = useState<any[]>([]);
   const [currentCoord, setCurrentCoord] = useState<any>(null);
   const [showSos, setShowSos] = useState(false);
+  const [showBgAsk, setShowBgAsk] = useState(false);
+  const [bgActive, setBgActive] = useState(false);
 
   const watchSub = useRef<Location.LocationSubscription | null>(null);
   const timer = useRef<any>(null);
@@ -47,6 +57,9 @@ export default function ActiveRun() {
   const nextKm = useRef(1);
   const lastSplitElapsed = useRef(0);
   const splits = useRef<any[]>([]);
+  const startTs = useRef(0);
+  const pausedAccum = useRef(0);
+  const pauseStart = useRef(0);
 
   useEffect(() => {
     (async () => {
@@ -56,8 +69,9 @@ export default function ActiveRun() {
       if (!p.granted && p.status === "undetermined") setPerm("undetermined");
     })();
     return () => {
-      if (watchSub.current) watchSub.current.remove();
+      try { if (watchSub.current) watchSub.current.remove(); } catch { /* ignore */ }
       if (timer.current) clearInterval(timer.current);
+      try { stopBackgroundRunTracking(); } catch { /* ignore */ }
     };
   }, []);
 
@@ -67,59 +81,102 @@ export default function ActiveRun() {
     setPerm(p.granted ? "granted" : "denied");
   };
 
-  const start = async () => {
+  const processCoord = (c: { latitude: number; longitude: number }) => {
+    if (pausedRef.current) return;
+    const coord = { latitude: c.latitude, longitude: c.longitude };
+    route.current.push(coord);
+    setCurrentCoord(coord);
+    setRouteState(route.current.slice());
+    if (lastCoord.current) {
+      const d = haversine(lastCoord.current, coord);
+      if (d < 60) {
+        distanceRef.current += d;
+        setDistance(distanceRef.current);
+        while (distanceRef.current / 1000 >= nextKm.current) {
+          const secs = elapsedRef.current - lastSplitElapsed.current;
+          splits.current.push({ km: nextKm.current, seconds: secs, pace: formatPace(secs) });
+          lastSplitElapsed.current = elapsedRef.current;
+          nextKm.current += 1;
+        }
+      }
+    }
+    lastCoord.current = coord;
+  };
+
+  const onStartPress = async () => {
+    if (Platform.OS !== "web") {
+      const bg = await getBackgroundPermission();
+      const asked = await storage.getItem("pace_bg_asked", false);
+      if (!bg.granted && bg.canAskAgain && !asked) {
+        setShowBgAsk(true);
+        return;
+      }
+    }
+    beginRun();
+  };
+
+  const enableBackgroundAndStart = async () => {
+    setShowBgAsk(false);
+    await storage.setItem("pace_bg_asked", true);
+    await requestBackgroundPermission();
+    beginRun();
+  };
+
+  const skipBackgroundAndStart = async () => {
+    setShowBgAsk(false);
+    await storage.setItem("pace_bg_asked", true);
+    beginRun();
+  };
+
+  const beginRun = async () => {
     setRunning(true);
     setPaused(false);
     pausedRef.current = false;
+    // Wall-clock timing so the chrono stays exact even when the phone is locked
+    startTs.current = Date.now();
+    pausedAccum.current = 0;
     timer.current = setInterval(() => {
       if (!pausedRef.current) {
-        elapsedRef.current += 1;
+        elapsedRef.current = Math.max(0, Math.floor((Date.now() - startTs.current - pausedAccum.current) / 1000));
         setElapsed(elapsedRef.current);
       }
-    }, 1000);
-    try {
-      watchSub.current = await Location.watchPositionAsync(
-        { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 5 },
-        (loc) => {
-          if (pausedRef.current) return;
-          const c = loc.coords;
-          const coord = { latitude: c.latitude, longitude: c.longitude };
-          route.current.push(coord);
-          setCurrentCoord(coord);
-          setRouteState(route.current.slice());
-          if (lastCoord.current) {
-            const d = haversine(lastCoord.current, c);
-            if (d < 60) {
-              distanceRef.current += d;
-              setDistance(distanceRef.current);
-              while (distanceRef.current / 1000 >= nextKm.current) {
-                const secs = elapsedRef.current - lastSplitElapsed.current;
-                splits.current.push({ km: nextKm.current, seconds: secs, pace: formatPace(secs) });
-                lastSplitElapsed.current = elapsedRef.current;
-                nextKm.current += 1;
-              }
-            }
-          }
-          lastCoord.current = c;
-        },
-      );
-    } catch {
-      /* ignore watch errors */
+    }, 500);
+
+    // Background tracking keeps recording when the screen is locked (real device only)
+    let bgStarted = false;
+    if (Platform.OS !== "web") {
+      setRunPointListener((pts) => pts.forEach((p) => processCoord(p)));
+      bgStarted = await startBackgroundRunTracking();
+      setBgActive(bgStarted);
+    }
+    if (!bgStarted) {
+      try {
+        watchSub.current = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 2000, distanceInterval: 5 },
+          (loc) => processCoord(loc.coords),
+        );
+      } catch {
+        /* ignore watch errors */
+      }
     }
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
   };
 
   const togglePause = () => {
     setPaused((p) => {
-      pausedRef.current = !p;
-      return !p;
+      const np = !p;
+      pausedRef.current = np;
+      if (np) pauseStart.current = Date.now();
+      else pausedAccum.current += Date.now() - pauseStart.current;
+      return np;
     });
     Haptics.selectionAsync();
   };
 
   const finish = async () => {
     if (timer.current) clearInterval(timer.current);
-    if (watchSub.current) watchSub.current.remove();
+    try { if (watchSub.current) watchSub.current.remove(); } catch { /* expo-location on web can throw */ }
+    try { await stopBackgroundRunTracking(); } catch { /* ignore */ }
     setSaving(true);
     const paceStr =
       distance > 0 ? formatPace(elapsed / (distance / 1000)) : null;
@@ -192,7 +249,7 @@ export default function ActiveRun() {
         <View style={styles.liveBadge}>
           <View style={[styles.liveDot, paused && { backgroundColor: colors.orange }]} />
           <AppText variant="caption" style={{ color: colors.text, fontFamily: fonts.semibold }}>
-            {running ? (paused ? "En pause" : "En cours") : "Prêt"}
+            {running ? (paused ? "En pause" : bgActive ? "En cours · veille ✓" : "En cours") : "Prêt"}
           </AppText>
         </View>
         <Pressable testID="sos-button" onPress={() => setShowSos(true)} style={styles.sosBtn}>
@@ -228,7 +285,7 @@ export default function ActiveRun() {
 
       <View style={{ paddingHorizontal: spacing.xl, paddingBottom: insets.bottom + spacing.xl, gap: spacing.md }}>
         {!running ? (
-          <PaceButton testID="run-start" label="Démarrer" icon="play" onPress={start} />
+          <PaceButton testID="run-start" label="Démarrer" icon="play" onPress={onStartPress} />
         ) : (
           <View style={{ flexDirection: "row", gap: spacing.md }}>
             <PaceButton
@@ -258,10 +315,10 @@ export default function ActiveRun() {
               <Ionicons name="warning" size={30} color={colors.danger} />
             </View>
             <AppText variant="h3" style={{ marginTop: spacing.md, textAlign: "center" }}>
-              Besoin d'aide ?
+              Besoin d&apos;aide ?
             </AppText>
             <AppText variant="body" style={{ marginTop: spacing.sm, textAlign: "center" }}>
-              Appuie pour ouvrir le numéro d'urgence européen (112). Communique ta position aux secours.
+              Appuie pour ouvrir le numéro d&apos;urgence européen (112). Communique ta position aux secours.
             </AppText>
             {currentCoord ? (
               <View style={styles.coordBox}>
@@ -284,6 +341,34 @@ export default function ActiveRun() {
             <Pressable testID="sos-cancel" onPress={() => setShowSos(false)} style={{ marginTop: spacing.md, padding: spacing.md }}>
               <AppText variant="bodyStrong" style={{ color: colors.textSecondary }}>
                 Annuler
+              </AppText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={showBgAsk} transparent animationType="fade" onRequestClose={skipBackgroundAndStart}>
+        <View style={styles.sosOverlay}>
+          <View style={styles.sosCard}>
+            <View style={[styles.sosIcon, { backgroundColor: colors.primarySoft }]}>
+              <Ionicons name="lock-closed" size={28} color={colors.primary} />
+            </View>
+            <AppText variant="h3" style={{ marginTop: spacing.md, textAlign: "center" }}>
+              Suivi écran verrouillé
+            </AppText>
+            <AppText variant="body" style={{ marginTop: spacing.sm, textAlign: "center" }}>
+              Autorise la localisation en arrière-plan pour que ta course continue d&apos;être enregistrée même téléphone en veille ou en poche.
+            </AppText>
+            <PaceButton
+              testID="bg-allow"
+              label="Activer le suivi en veille"
+              icon="navigate"
+              onPress={enableBackgroundAndStart}
+              style={{ marginTop: spacing.xl, alignSelf: "stretch" }}
+            />
+            <Pressable testID="bg-skip" onPress={skipBackgroundAndStart} style={{ marginTop: spacing.md, padding: spacing.md }}>
+              <AppText variant="bodyStrong" style={{ color: colors.textSecondary }}>
+                Continuer sans
               </AppText>
             </Pressable>
           </View>

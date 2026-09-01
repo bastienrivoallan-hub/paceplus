@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, View } from "react-native";
-import { useFocusEffect } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -20,6 +20,7 @@ const FILTERS = [
 
 export default function ExploreScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const [routes, setRoutes] = useState<any[]>([]);
   const [filter, setFilter] = useState("all");
   const [sug, setSug] = useState<any>(null);
@@ -120,6 +121,20 @@ export default function ExploreScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing.xl, paddingTop: spacing.md, paddingBottom: 28, gap: spacing.md }}>
+        {/* 3D circuits map entry */}
+        <Pressable testID="open-circuits-map" onPress={() => router.push("/routes-map")} style={styles.sugCta}>
+          <View style={[styles.sugIcon, { backgroundColor: "rgba(91,141,239,0.15)" }]}>
+            <Ionicons name="map" size={22} color={colors.blue} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <AppText variant="bodyStrong">Circuits sur carte 3D</AppText>
+            <AppText variant="caption" style={{ marginTop: 2 }}>
+              Génère des boucles de course autour de ta position
+            </AppText>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+        </Pressable>
+
         {/* Coach weather route suggestion */}
         {sug ? (
           <Card style={styles.sugCard} testID="route-weather-card">

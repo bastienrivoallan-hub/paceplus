@@ -112,3 +112,13 @@
 - Frontend: RaceWeatherCard on Home (city search modal, forecast, flags, collapsible strategy); Explore has "Circuit selon la météo" card + recommended badge on route list; notifications.ts has scheduleRaceWeatherAlert (device-only)
 - Test account thomas@pace.app race_date temporarily set to J+2 with race_location Annecy => /api/race/weather returns "difficult" (chaleur) with strategy. Verified via curl + screenshots.
 - needs_retesting: true (backend iteration 4 endpoints + frontend flows)
+
+## Iteration 5 — Background GPS tracking + 3D circuits map (main agent, FRONTEND ONLY changes)
+- No backend changes (security hardening only: generic 502 error messages instead of str(e)).
+- New: /app/frontend/src/backgroundLocation.ts (expo-task-manager task "pace-run-tracking", bg permission helpers, start/stop background updates with Android foreground service). Task registered via import in app/_layout.tsx.
+- run/active.tsx refactor: wall-clock chrono (startTs/pausedAccum refs) so time stays exact when screen locked; processCoord extracted; onStartPress shows one-time modal (testID bg-allow / bg-skip) asking background permission on NATIVE only (Platform web skips modal and uses watchPositionAsync fallback); finish/unmount stop background tracking; live badge shows "En cours · veille ✓" when bg active.
+- New screen /routes-map (Circuits 3D): permission gate (circuits-allow-location / circuits-open-settings), generates 3 organic loops around GPS position (src/circuits.ts), distance chips 3/5/8/10/15 km (circuit-dist-N), shuffle (circuit-regenerate), circuit cards (circuit-c0..c2), "Courir ce circuit" (run-circuit) → /run/active. Native map = react-native-maps 3D camera (pitch 55, showsBuildings); web fallback = SVG (CircuitsMap.web.tsx).
+- Explore: new entry card testID open-circuits-map.
+- app.json: background location (iOS UIBackgroundModes + NSLocationAlways..., Android ACCESS_BACKGROUND_LOCATION + FOREGROUND_SERVICE*) — device/build only, NOT testable in web/Expo Go.
+- Playwright hint: grant geolocation via context.grant_permissions(["geolocation"]) + context.set_geolocation({latitude:45.9,longitude:6.13}) to test circuits + run tracking on web.
+- needs_retesting: true (frontend flows only)
