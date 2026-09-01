@@ -192,7 +192,7 @@ export default function CalendarScreen() {
                       ) : null}
                       {isToday ? (
                         <AppText variant="bodyStrong" style={{ color: colors.primary, marginTop: 2, fontSize: 13 }}>
-                          Aujourd'hui
+                          Aujourd&apos;hui
                         </AppText>
                       ) : null}
                     </View>

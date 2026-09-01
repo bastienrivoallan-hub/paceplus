@@ -107,4 +107,14 @@ export const api = {
   // connected watches
   syncWatchWorkouts: (workouts: any[]) => request("/health/workouts", { method: "POST", body: { workouts } }),
   watchWorkouts: () => request("/health/workouts"),
+
+  // social
+  searchUsers: (q: string) => request(`/users/search?q=${encodeURIComponent(q)}`),
+  friendRequest: (user_id: string) => request("/friends/request", { method: "POST", body: { user_id } }),
+  friendRespond: (friendship_id: string, accept: boolean) =>
+    request("/friends/respond", { method: "POST", body: { friendship_id, accept } }),
+  friends: () => request("/friends"),
+  leaderboard: (period: "week" | "month") => request(`/friends/leaderboard?period=${period}`),
+  friendsFeed: () => request("/friends/feed"),
+  notifications: () => request("/notifications"),
 };

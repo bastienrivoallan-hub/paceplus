@@ -1,0 +1,30 @@
+{
+  "summary": "Iteration 8 social suite + full button audit fully validated. BACKEND (11/11 pytest green in test_iteration8_social.py, 4.98s): (1) GET /api/users/search?q=lea returns Léa with status='accepted' from thomas; short query (<2 chars) returns []; (2) full request→accept flow with a temp registered user: thomas POST /api/friends/request (200 + friendship_id), duplicate returns 400, temp GET /api/friends shows pending_received, GET /api/notifications badge=1, POST /api/friends/respond accept flips friendship to accepted for both sides; (3) refuse path deletes friendship and allows re-request (200); (4) self-request → 400; (5) /friends/leaderboard?period=week sorted desc by km with is_me flag on thomas (Toi=13.2km/4 sorties, Léa=6.2km/1 sortie week) — month period 200, invalid period → 422; (6) /friends/feed returns Léa's 3 runs each with `user` card, `route` field stripped; (7) GET /api/runs/{lea_run_id} as thomas → 200 with owner_name='Léa Dupont' + is_friend_run=True, as Léa (owner) → 200 without is_friend_run, as fresh non-friend → 404; (8) notifications badge == len(pending_received). FRONTEND (mobile viewport 390x844, geolocation 45.9/6.13): full button audit passed — Home hamburger (home-menu) opens side menu with menu-activity/menu-friends/menu-circuits/menu-coach, all navigate correctly; bell (home-bell) → /notifications; start-session-button → /run/active with sessionId; on run/active the location-gated screen is bypassed with granted geolocation so zombie-toggle + run-start + sos-button + run-pause + run-finish all render; zombie flow works (toggle ON → run-start → zombie-banner 'Échauffement — Zone calme…' + zombie-countdown 4:58); Profile has regenerate-plan-button, edit-goals-button, my-friends-button (→ /friends), notif-switch, logout-button — sync-apple-health correctly absent on web (iter7 fix); /friends search 'lea' shows 'Ami ✓' badge; Progression leaderboard-card shows Toi (13.2 km, 4 sorties) + Léa Dupont, week/month chips (leaderboard-week/leaderboard-month) switch data (month → Léa=6.2km/1 sortie top); /activity feed renders 3 feed-* rows navigating to friend summary (title 'Course de Léa Dupont', 'Analyser ma course' HIDDEN, summary-done labeled 'Retour'); Explore open-circuits-map present; Calendar adapt-week-button present; Coach coach-input/coach-send present; /routes-map circuits-close/circuit-dist-5/circuit-regenerate/run-circuit all render with real ORS boucles. No red-screen, only benign expo-notifications + pointerEvents deprecation warnings.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iteration8_social.py",
+    "/app/test_reports/pytest/iter8_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is now ~1546 lines — the social block (search/request/respond/list/leaderboard/feed/notifications, lines 1284-1427) plus the ORS circuits router should be split into `routers/social.py` and `routers/circuits.py` for maintainability.",
+    "GET /api/notifications internally calls list_friends (dependency-injected user) then re-queries the same friendship rels via accepted_friend_ids — two round trips where one aggregated fetch would do. Fine at current scale.",
+    "GET /api/friends/leaderboard aggregates in Python over up to 1000 runs; if user counts grow, an $group aggregation pipeline would be more efficient and avoid loading raw run docs.",
+    "Deprecation warning still surfaces in console: 'props.pointerEvents is deprecated. Use style.pointerEvents' — likely from an inner Card/Pressable in the RN web build. Non-blocking but worth chasing when it's convenient."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iteration8_social.py (new)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "100%"},
+  "seed_data_creation": "Each request/refuse test registers a throwaway TEST_temp_/TEST_refuse_/TEST_stranger_ user (prefixed) via /api/auth/register — no plan generated, no runs seeded, so credit cost is nil. Users are not deleted at teardown because there is no admin DELETE endpoint; they remain harmless in DB. Existing thomas ↔ lea accepted friendship + Léa's 3 seeded runs (used for feed/leaderboard/friend-run access) are untouched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Backend URL env = EXPO_PUBLIC_BACKEND_URL. Login testIDs: auth-email-input / auth-password-input / auth-submit-button. Iter 8 regression baseline: /app/backend/tests/test_iteration8_social.py (11 tests, ~5s). Iteration 8 introduces 8 new endpoints (users/search, friends/request, friends/respond, friends CRUD, friends/leaderboard, friends/feed, notifications, plus the /runs/{id} friend-scoped branch) and 3 new screens (friends.tsx, activity.tsx, notifications.tsx) — all covered. /run/active requires ctx.grant_permissions(['geolocation']) + set_geolocation to reveal zombie-toggle / run-start / sos-button (otherwise the run-allow-location gate is shown). Web preview never triggers the bg-allow/bg-skip modal (background permission is native-only), so the run-start button transitions directly to the running state. Léa's seeded run ids can be discovered via /api/friends/feed at runtime — do NOT hardcode them.",
+  "rca_of_issue": "N/A — feature verification only, no bugs found. Full button audit did not surface any dead interactive element."
+}

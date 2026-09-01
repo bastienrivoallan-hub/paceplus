@@ -28,7 +28,7 @@ export default function LevelStep() {
           Ton niveau actuel ?
         </AppText>
         <AppText variant="body" style={{ marginTop: 6, marginBottom: spacing.xl }}>
-          Pour calibrer l'intensité de ton programme.
+          Pour calibrer l&apos;intensité de ton programme.
         </AppText>
 
         {LEVELS.map((l) => {

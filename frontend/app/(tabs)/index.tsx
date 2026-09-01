@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
+import { Modal, Pressable, RefreshControl, ScrollView, StyleSheet, View } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -43,6 +43,8 @@ export default function HomeScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [weather, setWeather] = useState<any>(null);
   const [weatherDenied, setWeatherDenied] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [notifBadge, setNotifBadge] = useState(0);
 
   const loadWeather = useCallback(async () => {
     try {
@@ -74,6 +76,7 @@ export default function HomeScreen() {
     } catch {
       /* ignore */
     }
+    api.notifications().then((n: any) => setNotifBadge(n.badge || 0)).catch(() => {});
   }, []);
 
   useFocusEffect(
@@ -98,13 +101,29 @@ export default function HomeScreen() {
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       {/* Sticky header */}
       <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
-        <Ionicons name="menu" size={26} color={colors.text} />
+        <Pressable testID="home-menu" onPress={() => setMenuOpen(true)} hitSlop={10}>
+          <Ionicons name="menu" size={26} color={colors.text} />
+        </Pressable>
         <Logo size={20} subtitle="TON COACH RUNNING" />
-        <View>
+        <Pressable testID="home-bell" onPress={() => router.push("/notifications")} hitSlop={10}>
           <Ionicons name="notifications-outline" size={24} color={colors.text} />
-          <View style={styles.dot} />
-        </View>
+          {notifBadge > 0 && <View style={styles.dot} />}
+        </Pressable>
       </View>
+
+      <Modal visible={menuOpen} transparent animationType="fade" onRequestClose={() => setMenuOpen(false)}>
+        <Pressable style={styles.menuOverlay} onPress={() => setMenuOpen(false)}>
+          <View style={[styles.menuPanel, { paddingTop: insets.top + 20 }]}>
+            <Logo size={20} />
+            <View style={{ marginTop: spacing.xl, gap: 4 }}>
+              <MenuItem testID="menu-activity" icon="pulse" label="Fil d'activité" onPress={() => { setMenuOpen(false); router.push("/activity"); }} />
+              <MenuItem testID="menu-friends" icon="people" label="Mes amis" onPress={() => { setMenuOpen(false); router.push("/friends"); }} />
+              <MenuItem testID="menu-circuits" icon="map" label="Circuits 3D" onPress={() => { setMenuOpen(false); router.push("/routes-map"); }} />
+              <MenuItem testID="menu-coach" icon="chatbubbles" label="Coach IA" onPress={() => { setMenuOpen(false); router.push("/coach"); }} />
+            </View>
+          </View>
+        </Pressable>
+      </Modal>
 
       <ScrollView
         contentContainerStyle={{ padding: spacing.xl, paddingBottom: 28 }}
@@ -115,7 +134,7 @@ export default function HomeScreen() {
           <View style={{ flex: 1, paddingRight: spacing.md }}>
             <AppText variant="h2">Bonjour {data?.name || ""} 👋</AppText>
             <AppText variant="body" style={{ marginTop: 4 }}>
-              Prêt à courir aujourd'hui ?
+              Prêt à courir aujourd&apos;hui ?
             </AppText>
           </View>
           <View style={styles.streak} testID="home-streak">
@@ -264,7 +283,7 @@ export default function HomeScreen() {
           </Card>
         ) : (
           <Card style={{ marginTop: spacing.xl, alignItems: "center", paddingVertical: spacing.xxl }}>
-            <AppText variant="title">Aucune séance aujourd'hui</AppText>
+            <AppText variant="title">Aucune séance aujourd&apos;hui</AppText>
             <AppText variant="caption" style={{ marginTop: 6 }}>
               Consulte ton calendrier pour la suite.
             </AppText>
@@ -286,6 +305,15 @@ export default function HomeScreen() {
         </Pressable>
       </ScrollView>
     </View>
+  );
+}
+
+function MenuItem({ icon, label, onPress, testID }: any) {
+  return (
+    <Pressable testID={testID} onPress={onPress} style={styles.menuItem}>
+      <Ionicons name={icon} size={20} color={colors.primary} />
+      <AppText variant="bodyStrong">{label}</AppText>
+    </Pressable>
   );
 }
 
@@ -415,5 +443,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.primarySoft,
+  },
+  menuOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.6)", flexDirection: "row" },
+  menuPanel: {
+    width: 280,
+    backgroundColor: colors.card,
+    borderRightWidth: 1,
+    borderRightColor: colors.border,
+    paddingHorizontal: spacing.xl,
+    height: "100%",
+  },
+  menuItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.md,
+    paddingVertical: spacing.lg,
+    minHeight: 48,
   },
 });

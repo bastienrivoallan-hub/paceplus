@@ -12,7 +12,8 @@ import { colors, fmtDuration, fonts, radius, spacing } from "@/src/theme";
 export default function RunSummary() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, friend } = useLocalSearchParams<{ id: string; friend?: string }>();
+  const isFriendView = friend === "1";
   const [run, setRun] = useState<any>(null);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -57,7 +58,7 @@ export default function RunSummary() {
           <Ionicons name="checkmark-done" size={30} color={colors.primary} />
         </View>
         <AppText variant="h2" style={{ marginTop: spacing.md }}>
-          Course terminée !
+          {isFriendView ? `Course de ${run.owner_name || "ton ami"}` : "Course terminée !"}
         </AppText>
         <AppText variant="caption" style={{ marginTop: 4 }}>
           {new Date(run.date).toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" })}
@@ -103,29 +104,37 @@ export default function RunSummary() {
           </>
         )}
 
-        <AppText variant="label" style={{ marginTop: spacing.xl, marginBottom: spacing.md }}>
-          ANALYSE DU COACH IA
-        </AppText>
-        {analysis ? (
-          <Card testID="run-analysis-card">
-            <AppText variant="body" style={{ color: colors.text, lineHeight: 22 }}>
-              {analysis}
+        {!isFriendView && (
+          <>
+            <AppText variant="label" style={{ marginTop: spacing.xl, marginBottom: spacing.md }}>
+              ANALYSE DU COACH IA
             </AppText>
-          </Card>
-        ) : (
-          <PaceButton
-            testID="analyze-run-button"
-            label="Analyser ma course"
-            variant="secondary"
-            icon="sparkles"
-            loading={analyzing}
-            onPress={analyze}
-          />
+            {analysis ? (
+              <Card testID="run-analysis-card">
+                <AppText variant="body" style={{ color: colors.text, lineHeight: 22 }}>
+                  {analysis}
+                </AppText>
+              </Card>
+            ) : (
+              <PaceButton
+                testID="analyze-run-button"
+                label="Analyser ma course"
+                variant="secondary"
+                icon="sparkles"
+                loading={analyzing}
+                onPress={analyze}
+              />
+            )}
+          </>
         )}
       </ScrollView>
 
       <View style={{ paddingHorizontal: spacing.xl, paddingBottom: insets.bottom + spacing.lg, paddingTop: spacing.sm }}>
-        <PaceButton testID="summary-done" label="Terminé" onPress={() => router.replace("/(tabs)")} />
+        <PaceButton
+          testID="summary-done"
+          label={isFriendView ? "Retour" : "Terminé"}
+          onPress={() => (isFriendView ? router.back() : router.replace("/(tabs)"))}
+        />
       </View>
     </View>
   );

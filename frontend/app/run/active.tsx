@@ -184,6 +184,7 @@ export default function ActiveRun() {
       pausedRef.current = np;
       if (np) pauseStart.current = Date.now();
       else pausedAccum.current += Date.now() - pauseStart.current;
+      if (zombieRef.current) zombieEngine.setPaused(np);
       return np;
     });
     Haptics.selectionAsync();

@@ -184,6 +184,14 @@ export default function ProfileScreen() {
           onPress={() => router.push("/onboarding/goal")}
           style={{ marginTop: spacing.sm }}
         />
+        <PaceButton
+          testID="my-friends-button"
+          label="Mes amis"
+          variant="ghost"
+          icon="people-outline"
+          onPress={() => router.push("/friends")}
+          style={{ marginTop: spacing.sm }}
+        />
         {msg && msg.includes("plan") && (
           <AppText testID="profile-msg" style={{ textAlign: "center", marginTop: spacing.sm, color: colors.primary }}>
             {msg}

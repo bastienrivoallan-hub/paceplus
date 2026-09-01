@@ -15,6 +15,17 @@ export default function ProgressionScreen() {
   const [runs, setRuns] = useState<any[]>([]);
   const [debrief, setDebrief] = useState<string | null>(null);
   const [debriefLoading, setDebriefLoading] = useState(false);
+  const [period, setPeriod] = useState<"week" | "month">("week");
+  const [board, setBoard] = useState<any[]>([]);
+
+  const loadBoard = useCallback(async (p: "week" | "month") => {
+    try {
+      const r = await api.leaderboard(p);
+      setBoard(r.leaderboard || []);
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const loadDebrief = async () => {
     setDebriefLoading(true);
@@ -41,7 +52,8 @@ export default function ProgressionScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-    }, [load]),
+      loadBoard(period);
+    }, [load, loadBoard, period]),
   );
 
   const maxKm = Math.max(1, ...(stats?.weekly_series || []).map((w: any) => w.km));
@@ -110,6 +122,58 @@ export default function ProgressionScreen() {
             </View>
           ) : (
             <AppText variant="caption">Enregistre des courses pour voir ton volume.</AppText>
+          )}
+        </Card>
+
+        <Card style={{ marginTop: spacing.xl }} testID="leaderboard-card">
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: spacing.md }}>
+            <AppText variant="label">CLASSEMENT ENTRE AMIS</AppText>
+            <View style={{ flexDirection: "row", gap: spacing.sm }}>
+              {(["week", "month"] as const).map((p) => (
+                <Pressable
+                  key={p}
+                  testID={`leaderboard-${p}`}
+                  onPress={() => { setPeriod(p); loadBoard(p); }}
+                  style={[styles.periodChip, period === p && { backgroundColor: colors.primary, borderColor: colors.primary }]}
+                >
+                  <AppText style={{ fontFamily: fonts.semibold, fontSize: 12, color: period === p ? "#07240D" : colors.textSecondary }}>
+                    {p === "week" ? "Semaine" : "Mois"}
+                  </AppText>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+          {board.length <= 1 ? (
+            <View style={{ alignItems: "center", paddingVertical: spacing.lg }}>
+              <AppText variant="caption" style={{ textAlign: "center" }}>
+                Ajoute des amis pour te comparer à eux !
+              </AppText>
+              <Pressable testID="leaderboard-add-friends" onPress={() => router.push("/friends")} style={styles.addFriendsBtn}>
+                <AppText style={{ fontFamily: fonts.semibold, fontSize: 13, color: "#07240D" }}>Trouver des amis</AppText>
+              </Pressable>
+            </View>
+          ) : (
+            board.map((b, i) => (
+              <View key={b.user_id} style={styles.boardRow} testID={`leaderboard-row-${i}`}>
+                <AppText style={{ fontFamily: fonts.displayBold, fontSize: 16, width: 24, color: i === 0 ? colors.primary : colors.textSecondary }}>
+                  {i + 1}
+                </AppText>
+                <View style={styles.boardAvatar}>
+                  <AppText style={{ fontFamily: fonts.displayBold, fontSize: 15, color: "#07240D" }}>
+                    {(b.name || "?").slice(0, 1).toUpperCase()}
+                  </AppText>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <AppText variant="bodyStrong" style={b.is_me ? { color: colors.primary } : undefined}>
+                    {b.is_me ? "Toi" : b.name || b.email}
+                  </AppText>
+                  <AppText variant="caption">{b.runs} sortie{b.runs > 1 ? "s" : ""}</AppText>
+                </View>
+                <AppText style={{ fontFamily: fonts.displayBold, fontSize: 18, color: colors.text }}>
+                  {b.km} <AppText variant="caption">km</AppText>
+                </AppText>
+              </View>
+            ))
           )}
         </Card>
 
@@ -194,4 +258,30 @@ const styles = StyleSheet.create({
   },
   runRow: { flexDirection: "row", alignItems: "center", gap: spacing.lg },
   runIcon: { width: 40, height: 40, borderRadius: radius.md, alignItems: "center", justifyContent: "center" },
+  periodChip: {
+    height: 30,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.pill,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.bgElevated,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  boardRow: { flexDirection: "row", alignItems: "center", gap: spacing.md, paddingVertical: spacing.sm, minHeight: 52 },
+  boardAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  addFriendsBtn: {
+    marginTop: spacing.md,
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: 9,
+  },
 });

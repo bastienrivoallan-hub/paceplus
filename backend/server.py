@@ -168,6 +168,15 @@ class WatchSyncBody(BaseModel):
     workouts: List[WatchWorkoutBody] = []
 
 
+class FriendRequestBody(BaseModel):
+    user_id: str
+
+
+class FriendRespondBody(BaseModel):
+    friendship_id: str
+    accept: bool
+
+
 # ----------------------------- auth -------------------------------------------
 
 @api.get("/")
@@ -659,9 +668,16 @@ async def list_runs(user: dict = Depends(get_current_user)):
 
 @api.get("/runs/{run_id}")
 async def get_run(run_id: str, user: dict = Depends(get_current_user)):
-    r = await db.runs.find_one({"run_id": run_id, "user_id": user["user_id"]}, {"_id": 0})
+    r = await db.runs.find_one({"run_id": run_id}, {"_id": 0})
     if not r:
         raise HTTPException(status_code=404, detail="Course introuvable")
+    if r["user_id"] != user["user_id"]:
+        friends = await accepted_friend_ids(user["user_id"])
+        if r["user_id"] not in friends:
+            raise HTTPException(status_code=404, detail="Course introuvable")
+        owner = await db.users.find_one({"user_id": r["user_id"]}, {"_id": 0})
+        r["owner_name"] = (owner or {}).get("name")
+        r["is_friend_run"] = True
     return r
 
 
@@ -1252,6 +1268,165 @@ async def list_watch_workouts(user: dict = Depends(get_current_user)):
     return {"workouts": items}
 
 
+# ----------------------------- social: friends / leaderboard / feed -----------
+
+def user_card(u: dict) -> dict:
+    return {"user_id": u["user_id"], "name": u.get("name"), "email": u.get("email"), "picture": u.get("picture")}
+
+
+async def accepted_friend_ids(user_id: str) -> List[str]:
+    docs = await db.friendships.find(
+        {"status": "accepted", "$or": [{"requester_id": user_id}, {"addressee_id": user_id}]}, {"_id": 0}
+    ).to_list(500)
+    return [d["addressee_id"] if d["requester_id"] == user_id else d["requester_id"] for d in docs]
+
+
+@api.get("/users/search")
+async def search_users(q: str, user: dict = Depends(get_current_user)):
+    q = q.strip()
+    if len(q) < 2:
+        return {"results": []}
+    rx = {"$regex": re.escape(q), "$options": "i"}
+    found = await db.users.find(
+        {"user_id": {"$ne": user["user_id"]}, "$or": [{"name": rx}, {"email": rx}]}, {"_id": 0}
+    ).to_list(10)
+    rels = await db.friendships.find(
+        {"$or": [{"requester_id": user["user_id"]}, {"addressee_id": user["user_id"]}]}, {"_id": 0}
+    ).to_list(500)
+    status_map = {}
+    for f in rels:
+        other = f["addressee_id"] if f["requester_id"] == user["user_id"] else f["requester_id"]
+        if f["status"] == "accepted":
+            st = "accepted"
+        else:
+            st = "pending_sent" if f["requester_id"] == user["user_id"] else "pending_received"
+        status_map[other] = {"status": st, "friendship_id": f["friendship_id"]}
+    return {"results": [
+        {**user_card(u), **status_map.get(u["user_id"], {"status": "none", "friendship_id": None})}
+        for u in found
+    ]}
+
+
+@api.post("/friends/request")
+async def friend_request(body: FriendRequestBody, user: dict = Depends(get_current_user)):
+    if body.user_id == user["user_id"]:
+        raise HTTPException(status_code=400, detail="Impossible de s'ajouter soi-même")
+    target = await db.users.find_one({"user_id": body.user_id})
+    if not target:
+        raise HTTPException(status_code=404, detail="Utilisateur introuvable")
+    existing = await db.friendships.find_one({"$or": [
+        {"requester_id": user["user_id"], "addressee_id": body.user_id},
+        {"requester_id": body.user_id, "addressee_id": user["user_id"]},
+    ]})
+    if existing:
+        raise HTTPException(status_code=400, detail="Demande déjà existante ou déjà amis")
+    doc = {
+        "friendship_id": new_id("fr"),
+        "requester_id": user["user_id"],
+        "addressee_id": body.user_id,
+        "status": "pending",
+        "created_at": now_utc().isoformat(),
+    }
+    await db.friendships.insert_one(doc)
+    return {"ok": True, "friendship_id": doc["friendship_id"]}
+
+
+@api.post("/friends/respond")
+async def friend_respond(body: FriendRespondBody, user: dict = Depends(get_current_user)):
+    f = await db.friendships.find_one({"friendship_id": body.friendship_id}, {"_id": 0})
+    if not f or f["addressee_id"] != user["user_id"] or f["status"] != "pending":
+        raise HTTPException(status_code=404, detail="Demande introuvable")
+    if body.accept:
+        await db.friendships.update_one({"friendship_id": body.friendship_id}, {"$set": {"status": "accepted"}})
+    else:
+        await db.friendships.delete_one({"friendship_id": body.friendship_id})
+    return {"ok": True, "status": "accepted" if body.accept else "refused"}
+
+
+@api.get("/friends")
+async def list_friends(user: dict = Depends(get_current_user)):
+    me = user["user_id"]
+    rels = await db.friendships.find({"$or": [{"requester_id": me}, {"addressee_id": me}]}, {"_id": 0}).to_list(500)
+    ids = set()
+    for f in rels:
+        ids.add(f["requester_id"])
+        ids.add(f["addressee_id"])
+    users = await db.users.find({"user_id": {"$in": list(ids)}}, {"_id": 0}).to_list(500)
+    umap = {u["user_id"]: user_card(u) for u in users}
+    friends, pending_received, pending_sent = [], [], []
+    for f in rels:
+        other = f["addressee_id"] if f["requester_id"] == me else f["requester_id"]
+        card = umap.get(other)
+        if not card:
+            continue
+        entry = {**card, "friendship_id": f["friendship_id"]}
+        if f["status"] == "accepted":
+            friends.append(entry)
+        elif f["addressee_id"] == me:
+            pending_received.append(entry)
+        else:
+            pending_sent.append(entry)
+    return {"friends": friends, "pending_received": pending_received, "pending_sent": pending_sent}
+
+
+def period_start(period: str) -> str:
+    today = date.today()
+    if period == "month":
+        return today.replace(day=1).isoformat()
+    return (today - timedelta(days=today.weekday())).isoformat()
+
+
+@api.get("/friends/leaderboard")
+async def friends_leaderboard(period: str = "week", user: dict = Depends(get_current_user)):
+    if period not in ("week", "month"):
+        raise HTTPException(status_code=422, detail="period = week | month")
+    me = user["user_id"]
+    ids = await accepted_friend_ids(me)
+    ids.append(me)
+    start = period_start(period)
+    runs = await db.runs.find({"user_id": {"$in": ids}, "date": {"$gte": start}}, {"_id": 0}).to_list(1000)
+    agg: dict = {uid: {"km": 0.0, "runs": 0} for uid in ids}
+    for r in runs:
+        a = agg[r["user_id"]]
+        a["km"] += r.get("distance_m", 0) / 1000.0
+        a["runs"] += 1
+    users = await db.users.find({"user_id": {"$in": ids}}, {"_id": 0}).to_list(500)
+    umap = {u["user_id"]: user_card(u) for u in users}
+    board = [
+        {**umap[uid], "km": round(v["km"], 1), "runs": v["runs"], "is_me": uid == me}
+        for uid, v in agg.items() if uid in umap
+    ]
+    board.sort(key=lambda x: (-x["km"], -x["runs"]))
+    return {"period": period, "start": start, "leaderboard": board}
+
+
+@api.get("/friends/feed")
+async def friends_feed(user: dict = Depends(get_current_user)):
+    ids = await accepted_friend_ids(user["user_id"])
+    if not ids:
+        return {"feed": []}
+    runs = await db.runs.find({"user_id": {"$in": ids}}, {"_id": 0, "route": 0}).sort("date", -1).to_list(20)
+    users = await db.users.find({"user_id": {"$in": ids}}, {"_id": 0}).to_list(500)
+    umap = {u["user_id"]: user_card(u) for u in users}
+    return {"feed": [{**r, "user": umap.get(r["user_id"])} for r in runs]}
+
+
+@api.get("/notifications")
+async def notifications(user: dict = Depends(get_current_user)):
+    data = await list_friends(user)
+    week_ago = (date.today() - timedelta(days=7)).isoformat()
+    ids = await accepted_friend_ids(user["user_id"])
+    recent = []
+    if ids:
+        runs = await db.runs.find(
+            {"user_id": {"$in": ids}, "date": {"$gte": week_ago}}, {"_id": 0, "route": 0, "splits": 0}
+        ).sort("date", -1).to_list(10)
+        users = await db.users.find({"user_id": {"$in": ids}}, {"_id": 0}).to_list(500)
+        umap = {u["user_id"]: user_card(u) for u in users}
+        recent = [{**r, "user": umap.get(r["user_id"])} for r in runs]
+    return {"requests": data["pending_received"], "recent_runs": recent, "badge": len(data["pending_received"])}
+
+
 # ----------------------------- real-road circuits (OpenRouteService) ----------
 
 CIRCUIT_STYLES = [
@@ -1351,6 +1526,7 @@ async def startup():
     await db.sessions.create_index([("user_id", 1), ("week", 1)])
     await db.runs.create_index([("user_id", 1), ("date", -1)])
     await db.watch_workouts.create_index([("user_id", 1), ("source", 1), ("external_id", 1)], unique=True)
+    await db.friendships.create_index([("requester_id", 1), ("addressee_id", 1)], unique=True)
     logger.info("PACE API started")
 
 

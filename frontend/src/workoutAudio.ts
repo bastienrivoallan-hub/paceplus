@@ -45,10 +45,10 @@ export function buildZombiePlan(totalMin: number): ZombiePhase[] {
 
 const SOURCES = {
   sprint_alert: require("../assets/audio/sprint_alert.wav"),
-  zombie_growl: require("../assets/audio/zombie_growl.wav"),
-  zombie_close: require("../assets/audio/zombie_close.wav"),
+  zombie_moan: require("../assets/audio/zombie_moan.wav"),
+  chase_loop: require("../assets/audio/chase_loop.wav"),
+  calm_loop: require("../assets/audio/calm_loop.wav"),
   safe_zone: require("../assets/audio/safe_zone.wav"),
-  recovery_breath: require("../assets/audio/recovery_breath.wav"),
   run_complete: require("../assets/audio/run_complete.wav"),
 };
 type SoundName = keyof typeof SOURCES;
@@ -62,6 +62,7 @@ class ZombieAudioEngine {
   private nextAmbientAt = 0;
   private doneSoundPlayed = false;
   private pendingTimeout: ReturnType<typeof setTimeout> | null = null;
+  private currentLoop: SoundName | null = null;
 
   async start(plan: ZombiePhase[]) {
     this.plan = plan;
@@ -75,6 +76,7 @@ class ZombieAudioEngine {
     this.lastIdx = -2;
     this.nextAmbientAt = 0;
     this.doneSoundPlayed = false;
+    this.currentLoop = null;
     try {
       // Ducking: other apps' music dips while our SFX play, background audio stays alive.
       await setAudioModeAsync({
@@ -99,9 +101,45 @@ class ZombieAudioEngine {
     const p = this.players[name];
     if (!p) return;
     try {
+      p.loop = false;
       p.volume = volume;
       p.seekTo(0);
       p.play();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Continuous ambience that keeps playing for the whole phase. */
+  private setLoop(name: SoundName | null, volume = 1) {
+    if (this.currentLoop && this.currentLoop !== name) {
+      try {
+        this.players[this.currentLoop]?.pause();
+      } catch {
+        /* ignore */
+      }
+    }
+    this.currentLoop = name;
+    if (!name) return;
+    const p = this.players[name];
+    if (!p) return;
+    try {
+      p.loop = true;
+      p.volume = volume;
+      p.seekTo(0);
+      p.play();
+    } catch {
+      /* ignore */
+    }
+  }
+
+  setPaused(paused: boolean) {
+    if (!this.currentLoop) return;
+    const p = this.players[this.currentLoop];
+    if (!p) return;
+    try {
+      if (paused) p.pause();
+      else p.play();
     } catch {
       /* ignore */
     }
@@ -122,33 +160,28 @@ class ZombieAudioEngine {
 
     if (idx !== this.lastIdx) {
       this.lastIdx = idx;
-      this.nextAmbientAt = elapsed + 6;
+      this.nextAmbientAt = elapsed + 7;
+      if (this.pendingTimeout) clearTimeout(this.pendingTimeout);
       if (kind === "sprint") {
         this.play("sprint_alert");
-        if (this.pendingTimeout) clearTimeout(this.pendingTimeout);
-        this.pendingTimeout = setTimeout(() => this.play("zombie_close"), 1600);
-      } else if (kind === "recovery" || kind === "cooldown") {
+        this.pendingTimeout = setTimeout(() => this.setLoop("chase_loop", 1), 1800);
+      } else if (kind === "recovery") {
         this.play("safe_zone");
+        this.pendingTimeout = setTimeout(() => this.setLoop("calm_loop", 0.55), 1500);
+      } else if (kind === "cooldown") {
+        this.play("safe_zone");
+        this.pendingTimeout = setTimeout(() => this.setLoop("calm_loop", 0.4), 1500);
       } else if (kind === "warmup") {
-        this.play("zombie_growl", 0.5);
+        this.setLoop("calm_loop", 0.5);
       } else if (kind === "done" && !this.doneSoundPlayed) {
         this.doneSoundPlayed = true;
+        this.setLoop(null);
         this.play("run_complete");
       }
-    } else if (elapsed >= this.nextAmbientAt) {
-      // Ambient loop inside the phase
-      if (kind === "sprint") {
-        this.play(Math.random() > 0.4 ? "zombie_close" : "zombie_growl");
-        this.nextAmbientAt = elapsed + 8 + Math.floor(Math.random() * 6);
-      } else if (kind === "recovery") {
-        this.play("recovery_breath", 0.8);
-        this.nextAmbientAt = elapsed + 15 + Math.floor(Math.random() * 6);
-      } else if (kind === "warmup") {
-        this.play("zombie_growl", 0.4);
-        this.nextAmbientAt = elapsed + 25 + Math.floor(Math.random() * 15);
-      } else {
-        this.nextAmbientAt = elapsed + 30;
-      }
+    } else if (kind === "sprint" && elapsed >= this.nextAmbientAt) {
+      // Extra zombie stingers on top of the chase loop
+      this.play("zombie_moan", 0.9);
+      this.nextAmbientAt = elapsed + 7 + Math.floor(Math.random() * 5);
     }
 
     const meta = PHASE_META[kind];
@@ -159,6 +192,7 @@ class ZombieAudioEngine {
   stop() {
     if (this.pendingTimeout) clearTimeout(this.pendingTimeout);
     this.pendingTimeout = null;
+    this.currentLoop = null;
     for (const key of Object.keys(this.players) as SoundName[]) {
       try {
         this.players[key]?.remove();
