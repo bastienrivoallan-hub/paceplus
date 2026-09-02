@@ -18,7 +18,30 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+import litellm
+
+class UserMessage:
+    def __init__(self, text: str):
+        self.text = text
+
+class LlmChat:
+    def __init__(self, api_key: str = None, session_id: str = None, system_message: str = ""):
+        self.system_message = system_message
+
+    def with_model(self, provider: str, model: str):
+        self.model = "gemini/gemini-3.6-flash"
+        return self
+
+    async def send_message(self, user_message):
+        response = await litellm.acompletion(
+            model=self.model,
+            api_key=GEMINI_API_KEY,
+            messages=[
+                {"role": "system", "content": self.system_message},
+                {"role": "user", "content": user_message.text},
+            ],
+        )
+        return response.choices[0].message.content
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / ".env")
@@ -26,14 +49,16 @@ load_dotenv(ROOT_DIR / ".env")
 mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
-EMERGENT_LLM_KEY = os.environ["EMERGENT_LLM_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+EMERGENT_LLM_KEY = GEMINI_API_KEY
 ORS_API_KEY = os.environ.get("ORS_API_KEY", "")
+GRAPHHOPPER_API_KEY = os.environ.get("GRAPHHOPPER_API_KEY", "")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("pace")
 
 app = FastAPI(title="PACE Running Coach")
-api = APIRouter(prefix="/api")
+api = APIRouter()
 
 
 # ----------------------------- helpers ---------------------------------------
@@ -778,12 +803,6 @@ RECOMMENDED_ROUTES = [
     {"id": "r6", "name": "Tour de Ville", "distance_km": 6.0, "elevation_m": 45, "surface": "Bitume", "difficulty": "Facile", "type": "easy", "terrain": "plat, abrité entre les immeubles"},
 ]
 
-
-@api.get("/routes")
-async def routes(user: dict = Depends(get_current_user)):
-    return {"routes": RECOMMENDED_ROUTES}
-
-
 # ----------------------------- weather (Open-Meteo) ---------------------------
 
 WMO_FR = {
@@ -1438,31 +1457,32 @@ CIRCUIT_STYLES = [
 
 async def ors_round_trip(hc: httpx.AsyncClient, lat: float, lon: float, target_m: int, seed: int):
     body = {
-        "coordinates": [[lon, lat]],  # ORS = [lon, lat]
+        "points": [[lon, lat]],
+        "profile": "foot",
+        "algorithm": "round_trip",
+        "round_trip.distance": target_m,
+        "round_trip.seed": seed,
+        "points_encoded": False,
         "instructions": False,
-        "options": {"round_trip": {"length": target_m, "points": 4, "seed": seed}},
     }
     r = await hc.post(
-        "https://api.openrouteservice.org/v2/directions/foot-walking/geojson",
-        headers={"Authorization": ORS_API_KEY, "Content-Type": "application/json"},
+        f"https://graphhopper.com/api/1/route?key={GRAPHHOPPER_API_KEY}",
+        headers={"Content-Type": "application/json"},
         json=body,
     )
     r.raise_for_status()
-    feat = r.json()["features"][0]
-    geom = feat["geometry"]
-    if geom.get("type") != "LineString" or len(geom.get("coordinates", [])) < 2:
+    path = r.json()["paths"][0]
+    coords = path["points"]["coordinates"]
+    if len(coords) < 2:
         raise ValueError("invalid geometry")
-    coords = geom["coordinates"]
-    # Cap payload size while keeping the route shape
     stride = max(1, len(coords) // 300)
     pts = [{"latitude": c[1], "longitude": c[0]} for c in coords[::stride]]
     if pts[-1] != {"latitude": coords[-1][1], "longitude": coords[-1][0]}:
         pts.append({"latitude": coords[-1][1], "longitude": coords[-1][0]})
-    summary = feat["properties"]["summary"]
     return {
         "seed": seed,
-        "distance_m": float(summary["distance"]),
-        "duration_s": float(summary["duration"]),
+        "distance_m": float(path["distance"]),
+        "duration_s": float(path["time"]) / 1000,
         "coords": pts,
     }
 
@@ -1478,16 +1498,21 @@ async def real_circuits(
         raise HTTPException(status_code=422, detail="Coordonnées invalides")
     if not (1 <= distance_km <= 30):
         raise HTTPException(status_code=422, detail="Distance entre 1 et 30 km")
-    if not ORS_API_KEY:
+    if not GRAPHHOPPER_API_KEY:
         raise HTTPException(status_code=503, detail="Service de circuits non configuré")
 
     target_m = int(distance_km * 1000)
-    seeds = random.sample(range(1, 100000), 5)
+    random.seed(int(lat * 1000 + lon * 1000 + target_m))
+    seeds = random.sample(range(1, 100000), 3)
+    results = []
     async with httpx.AsyncClient(timeout=25) as hc:
-        results = await asyncio.gather(
-            *(ors_round_trip(hc, lat, lon, target_m, s) for s in seeds),
-            return_exceptions=True,
-        )
+        for s in seeds:
+            try:
+                res = await ors_round_trip(hc, lat, lon, target_m, s)
+                results.append(res)
+            except Exception as e:
+                results.append(e)
+            await asyncio.sleep(2.5)
 
     ok = [r for r in results if not isinstance(r, Exception)]
     for r in results:

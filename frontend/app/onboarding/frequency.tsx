@@ -60,7 +60,7 @@ export default function FrequencyStep() {
         </AppText>
 
         <View style={styles.freqRow}>
-          {[2, 3, 4, 5, 6].map((n) => {
+          {[1, 2, 3, 4, 5, 6, 7].map((n) => {
             const active = data.frequency === n;
             return (
               <Pressable
