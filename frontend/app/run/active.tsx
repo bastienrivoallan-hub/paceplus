@@ -17,6 +17,8 @@ import { storage } from "@/src/utils/storage";
 import { buildZombiePlan, zombieEngine, ZombieInfo } from "@/src/workoutAudio";
 import { api } from "@/src/api";
 import { AppText, PaceButton } from "@/src/components/ui";
+import { RouteGuide } from "@/src/routeGuide";
+import type { Coord } from "@/src/circuits";
 import RunMap from "@/src/components/RunMap";
 import { colors, fmtDuration, fonts, radius, spacing } from "@/src/theme";
 
@@ -33,7 +35,7 @@ function haversine(a: any, b: any) {
 export default function ActiveRun() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { sessionId } = useLocalSearchParams<{ sessionId?: string }>();
+  const { sessionId, circuit } = useLocalSearchParams<{ sessionId?: string; circuit?: string }>();
 
   const [perm, setPerm] = useState<"undetermined" | "granted" | "denied">("undetermined");
   const [canAskAgain, setCanAskAgain] = useState(true);
@@ -55,6 +57,7 @@ export default function ActiveRun() {
   const watchSub = useRef<Location.LocationSubscription | null>(null);
   const timer = useRef<any>(null);
   const lastCoord = useRef<any>(null);
+  const routeGuideRef = useRef<RouteGuide | null>(null);
   const route = useRef<any[]>([]);
   const pausedRef = useRef(false);
   const elapsedRef = useRef(0);
@@ -92,6 +95,17 @@ export default function ActiveRun() {
     setPerm(p.granted ? "granted" : "denied");
   };
 
+  useEffect(() => {
+    if (circuit) {
+      try {
+        const coords: Coord[] = JSON.parse(circuit);
+        if (coords.length > 1) routeGuideRef.current = new RouteGuide(coords);
+      } catch {
+        /* ignore malformed circuit param */
+      }
+    }
+  }, [circuit]);
+
   const processCoord = (c: { latitude: number; longitude: number }) => {
     if (pausedRef.current) return;
     const coord = { latitude: c.latitude, longitude: c.longitude };
@@ -112,6 +126,7 @@ export default function ActiveRun() {
       }
     }
     lastCoord.current = coord;
+    routeGuideRef.current?.update(coord);
   };
 
   const onStartPress = async () => {

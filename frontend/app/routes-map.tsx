@@ -244,7 +244,15 @@ export default function RoutesMapScreen() {
             testID="run-circuit"
             label={`Courir ce circuit (${selectedCircuit.distance_km} km · ~${estMin} min)`}
             icon="play"
-            onPress={() => router.push("/run/active")}
+            onPress={() =>
+              router.push({
+                pathname: "/run/active",
+                params: {
+                  circuitId: String(selectedCircuit.id),
+                  circuit: JSON.stringify(selectedCircuit.coords),
+                },
+              })
+            }
             style={{ marginHorizontal: spacing.xl, marginTop: spacing.md }}
           />
         ) : null}
