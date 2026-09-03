@@ -6,7 +6,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 
-import { useAuth } from "@/src/context/AuthContext";
+import { useAuth } from "@/src/contexts/AuthContext";
 import { AppText, Logo, PaceButton } from "@/src/components/ui";
 import { colors, fonts, radius, spacing } from "@/src/theme";
 

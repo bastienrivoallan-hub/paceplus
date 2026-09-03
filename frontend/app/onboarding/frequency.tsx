@@ -5,8 +5,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { OnboardingHeader } from "@/src/components/OnboardingHeader";
 import { AppText, Logo, PaceButton } from "@/src/components/ui";
-import { useOnboarding } from "@/src/context/OnboardingContext";
-import { useAuth } from "@/src/context/AuthContext";
+import { useOnboarding } from "@/src/contexts/OnboardingContext";
+import { useAuth } from "@/src/contexts/AuthContext";
 import { api } from "@/src/api";
 import { colors, fonts, radius, spacing } from "@/src/theme";
 

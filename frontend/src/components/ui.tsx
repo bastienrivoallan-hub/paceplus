@@ -18,17 +18,28 @@ import { colors, fonts, radius, spacing, workoutMeta } from "@/src/theme";
 export function Logo({ size = 22, subtitle }: { size?: number; subtitle?: string }) {
   return (
     <View style={{ alignItems: "center" }}>
-      <Text
-        style={{
-          fontFamily: fonts.displayBold,
-          fontSize: size,
-          color: colors.text,
-          letterSpacing: size * 0.32,
-          paddingLeft: size * 0.32,
-        }}
-      >
-        PACE
-      </Text>
+      <View style={{ flexDirection: "row", alignItems: "flex-start" }}>
+        <Text
+          style={{
+            fontFamily: fonts.displayBold,
+            fontSize: size,
+            color: colors.text,
+            letterSpacing: size * 0.32,
+            paddingLeft: size * 0.32,
+          }}
+        >
+          PACE
+        </Text>
+        <Text
+          style={{
+            fontFamily: fonts.displayBold,
+            fontSize: size,
+            color: colors.text,
+          }}
+        >
+          +
+        </Text>
+      </View>
       {subtitle ? (
         <Text
           style={{

@@ -6,7 +6,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { OnboardingHeader } from "@/src/components/OnboardingHeader";
 import { AppText, PaceButton } from "@/src/components/ui";
-import { useOnboarding } from "@/src/context/OnboardingContext";
+import { useOnboarding } from "@/src/contexts/OnboardingContext";
 import { colors, fonts, radius, spacing } from "@/src/theme";
 
 const TIME_RANGES: Record<string, string[]> = {

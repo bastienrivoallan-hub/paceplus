@@ -12,7 +12,7 @@ import {
   requestReminderPermission,
   scheduleSessionReminders,
 } from "@/src/notifications";
-import { useAuth } from "@/src/context/AuthContext";
+import { useAuth } from "@/src/contexts/AuthContext";
 import { appleHealthSupported, connectAppleHealth, fetchAppleWatchRuns, isExpoGo, WatchWorkout } from "@/src/health";
 import { AppText, Card, Logo, PaceButton } from "@/src/components/ui";
 import { colors, fonts, radius, spacing } from "@/src/theme";

@@ -5,7 +5,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 import { OnboardingHeader } from "@/src/components/OnboardingHeader";
 import { AppText, PaceButton } from "@/src/components/ui";
-import { useOnboarding } from "@/src/context/OnboardingContext";
+import { useOnboarding } from "@/src/contexts/OnboardingContext";
 import { colors, radius, spacing } from "@/src/theme";
 
 const LEVELS = [
