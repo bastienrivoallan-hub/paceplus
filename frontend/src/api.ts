@@ -264,6 +264,10 @@ export const api = {
   },
 
   // ---------- circuits ----------
+  runGhost(runId: string) {
+    return this.request(`/runs/${runId}/ghost`);
+  },
+
   circuits(lat: number, lon: number, distance: number) {
     return this.request(`/circuits?lat=${lat}&lon=${lon}&distance_km=${distance}`);
   },

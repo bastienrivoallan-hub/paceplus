@@ -17,6 +17,7 @@ export default function RunSummary() {
   const [run, setRun] = useState<any>(null);
   const [analysis, setAnalysis] = useState<string | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [ghost, setGhost] = useState<any>(null);
 
   const analyze = async () => {
     setAnalyzing(true);
@@ -34,6 +35,12 @@ export default function RunSummary() {
     (async () => {
       try {
         setRun(await api.run(String(id)));
+      } catch {
+        /* ignore */
+      }
+      try {
+        const g = await api.runGhost(String(id));
+        if (g?.found) setGhost(g);
       } catch {
         /* ignore */
       }
@@ -75,6 +82,23 @@ export default function RunSummary() {
             <Big label="ALLURE" value={run.avg_pace || "--:--"} unit="/km" />
           </View>
         </Card>
+
+        {ghost && !isFriendView ? (
+          <Card style={{ marginTop: spacing.xl, borderColor: ghost.faster ? colors.primary : colors.danger }} testID="ghost-card">
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm, marginBottom: spacing.sm }}>
+              <Ionicons name="body-outline" size={16} color={ghost.faster ? colors.primary : colors.danger} />
+              <AppText variant="label" style={{ color: ghost.faster ? colors.primary : colors.danger }}>
+                MODE FANTOME
+              </AppText>
+            </View>
+            <AppText variant="bodyStrong">
+              {ghost.faster ? "Plus rapide" : "Plus lent"} de {fmtDuration(Math.abs(ghost.delta_seconds))} par rapport a ta derniere fois
+            </AppText>
+            <AppText variant="caption" style={{ marginTop: 4 }}>
+              Le {new Date(ghost.previous_date).toLocaleDateString("fr-FR", { day: "numeric", month: "short" })} : {fmtDuration(ghost.previous_duration_s)} ({ghost.previous_avg_pace || "--:--"}/km)
+            </AppText>
+          </Card>
+        ) : null}
 
         <AppText variant="label" style={{ marginTop: spacing.xl, marginBottom: spacing.md }}>
           PARCOURS
