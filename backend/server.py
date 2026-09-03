@@ -29,7 +29,7 @@ class LlmChat:
         self.system_message = system_message
 
     def with_model(self, provider: str, model: str):
-        self.model = "groq/llama-3.3-70b-versatile"
+        self.model = "groq/openai/gpt-oss-120b"
         return self
 
     async def send_message(self, user_message):
