@@ -29,13 +29,13 @@ class LlmChat:
         self.system_message = system_message
 
     def with_model(self, provider: str, model: str):
-        self.model = "gemini/gemini-3.6-flash"
+        self.model = "groq/llama-3.3-70b-versatile"
         return self
 
     async def send_message(self, user_message):
         response = await litellm.acompletion(
             model=self.model,
-            api_key=GEMINI_API_KEY,
+            api_key=GROQ_API_KEY,
             messages=[
                 {"role": "system", "content": self.system_message},
                 {"role": "user", "content": user_message.text},
@@ -50,6 +50,7 @@ mongo_url = os.environ["MONGO_URL"]
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ["DB_NAME"]]
 GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 EMERGENT_LLM_KEY = GEMINI_API_KEY
 ORS_API_KEY = os.environ.get("ORS_API_KEY", "")
 GRAPHHOPPER_API_KEY = os.environ.get("GRAPHHOPPER_API_KEY", "")
@@ -855,6 +856,22 @@ def weather_advice_fr(feels, wind, rain, code):
         return "Froid : échauffe-toi progressivement et couvre-toi bien."
     return "Conditions favorables pour courir. Bonne séance !"
 
+def weather_score_from(feels, wind, rain, code):
+    c = int(code) if code is not None else -1
+    if c in (95, 96, 99):
+        return 10
+
+    score = 100
+    if (rain or 0) >= 70:
+        score -= 25
+    if (wind or 0) >= 35:
+        score -= 20
+    if feels is not None and feels >= 30:
+        score -= 20
+    if feels is not None and feels <= 0:
+        score -= 15
+    return max(0, min(100, score))
+
 
 async def fetch_weather(lat: float, lon: float, hours: int = 6):
     params = {
@@ -899,7 +916,16 @@ async def fetch_weather(lat: float, lon: float, hours: int = 6):
         })
     advice = weather_advice_fr(current["feels_like_c"], current["wind_kmh"],
                                current["precipitation_probability"], current["weather_code"])
-    return {"current": current, "next_hours": nxt, "advice": advice, "source": "Open-Meteo"}
+    return {
+        "current": current,
+        "next_hours": nxt,
+        "advice": advice,
+        "running_score": weather_score_from(
+            current["feels_like_c"], current["wind_kmh"],
+            current["precipitation_probability"], current["weather_code"]
+        ),
+        "source": "Open-Meteo",
+    }
 
 
 @api.get("/weather")

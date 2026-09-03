@@ -30,6 +30,7 @@ export default function RaceWeatherCard() {
   const load = useCallback(async () => {
     try {
       const r = await api.raceWeather();
+      console.log("raceWeather response:", r);
       setRace(r);
       if (r.status === "difficult" && r.flags?.length && Platform.OS !== "web") {
         scheduleRaceWeatherAlert(r.race_date, r.flags);

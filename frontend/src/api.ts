@@ -4,7 +4,7 @@ const debuggerHost = Constants.expoConfig?.hostUri || Constants.manifest?.debugg
 const IP = debuggerHost ? debuggerHost.split(':')[0] : 'localhost';
 console.log("IP détectée automatiquement:", IP);
 
-export const API_URL = `http://${IP}:8000`;
+export const API_URL = 'https://paceplus.onrender.com';
 
 let authToken: string | null = null;
 
@@ -12,7 +12,15 @@ export const setAuthToken = (token: string | null) => {
   authToken = token;
 };
 
-// Objet centralisé pour toutes tes requêtes vers FastAPI
+type OnboardingData = {
+  goal: string;
+  level: string;
+  current_time?: string | null;
+  target_time?: string | null;
+  race_date?: string | null;
+  frequency: number;
+};
+
 export const api = {
   async request(endpoint: string, options: RequestInit = {}) {
     const headers: Record<string, string> = {
@@ -38,6 +46,7 @@ export const api = {
     return data;
   },
 
+  // ---------- auth ----------
   login(email: string, password: string) {
     return this.request('/auth/login', {
       method: 'POST',
@@ -52,6 +61,13 @@ export const api = {
     });
   },
 
+  googleSession(sessionId: string) {
+    return this.request('/auth/session', {
+      method: 'POST',
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+  },
+
   me() {
     return this.request('/auth/me');
   },
@@ -60,27 +76,31 @@ export const api = {
     return this.request('/auth/logout', { method: 'POST' });
   },
 
-  googleSession(sessionId: string) {
-    return this.request(`/auth/google/session?session_id=${sessionId}`);
-  },
-googleSession(sessionId: string) {
-    return this.request(`/auth/google/session?session_id=${sessionId}`);
-  },
-
-  stats() {
-    return this.request('/stats');
+  // ---------- profile / onboarding ----------
+  saveOnboarding(profileData: OnboardingData) {
+    return this.request('/profile/onboarding', {
+      method: 'PUT',
+      body: JSON.stringify(profileData),
+    });
   },
 
-  runs() {
-    return this.request('/runs');
+  saveRaceLocation(city: string, lat: number, lon: number) {
+    return this.request('/profile/race-location', {
+      method: 'PUT',
+      body: JSON.stringify({ city, lat, lon }),
+    });
   },
 
-  weeklyDebrief() {
-    return this.request('/coach/weekly-debrief');
+  // ---------- plan ----------
+  generatePlan() {
+    return this.request('/plan/generate', { method: 'POST' });
   },
 
-  leaderboard(period: "week" | "month") {
-    return this.request(`/friends/leaderboard?period=${period}`);
+  adaptPlan(week: number) {
+    return this.request('/plan/adapt', {
+      method: 'POST',
+      body: JSON.stringify({ week }),
+    });
   },
 
   activePlan() {
@@ -91,11 +111,13 @@ googleSession(sessionId: string) {
     return this.request(`/plan/week/${w}`);
   },
 
-  adaptPlan(week: number) {
-    return this.request('/plan/adapt', {
-      method: 'POST',
-      body: JSON.stringify({ week }),
-    });
+  upcomingSessions() {
+    return this.request('/plan/upcoming');
+  },
+
+  // ---------- sessions ----------
+  session(sessionId: string) {
+    return this.request(`/sessions/${sessionId}`);
   },
 
   completeSession(sessionId: string) {
@@ -110,71 +132,139 @@ googleSession(sessionId: string) {
     });
   },
 
-  circuits(lat: number, lon: number, distance: number) {
-    return this.request(`/circuits?lat=${lat}&lon=${lon}&distance_km=${distance}`);
+  // ---------- home ----------
+  homeToday() {
+    return this.request('/home/today');
   },
 
-  saveOnboarding(profileData: {
-    goal: string;
-    level: string;
-    current_time?: string;
-    target_time?: string;
-    race_date?: string;
-    frequency: number;
+  // ---------- runs ----------
+  saveRun(run: {
+    distance_m: number;
+    duration_s: number;
+    route?: any[];
+    splits?: any[];
+    session_id?: string;
+    avg_pace?: string;
   }) {
-    return this.request('/profile/onboarding', {
-      method: 'PUT',
-      body: JSON.stringify(profileData),
-    });
-  },
-  generatePlan() {
-    return this.request('/plan/generate', {
+    return this.request('/runs', {
       method: 'POST',
+      body: JSON.stringify(run),
     });
   },
-  watchWorkouts() {
-    return this.request('/health/workouts');
+
+  runs() {
+    return this.request('/runs');
   },
 
-  notifications() {
-    return this.request('/notifications');
+  run(runId: string) {
+    return this.request(`/runs/${runId}`);
   },
 
-  saveOnboarding(profileData: {
-    goal: string;
-    level: string;
-    current_time?: string;
-    target_time?: string;
-    race_date?: string;
-    frequency: number;
-  }) {
-    return this.request('/profile/onboarding', {
-      method: 'PUT',
-      body: JSON.stringify(profileData),
-    });
-  },
-  generatePlan() {
-    return this.request('/plan/generate', {
-      method: 'POST',
-    });
-  },
-  watchWorkouts() {
-    return this.request('/health/workouts');
+  // ---------- stats ----------
+  stats() {
+    return this.request('/stats');
   },
 
-  notifications() {
-    return this.request('/notifications');
-  },
-};
-// Ajout manuel : fonctions coach chat
-Object.assign(api, {
+  // ---------- coach ----------
   coachHistory() {
     return this.request('/coach/history');
   },
-  coachChat(message) {
+
+  coachChat(message: string) {
     return this.request('/coach/chat', {
       method: 'POST',
       body: JSON.stringify({ message }),
     });
   },
-});
+
+  runAnalysis(runId: string) {
+    return this.request('/coach/run-analysis', {
+      method: 'POST',
+      body: JSON.stringify({ run_id: runId }),
+    });
+  },
+
+  weeklyDebrief() {
+    return this.request('/coach/weekly-debrief');
+  },
+
+  nutrition(params: { session_id?: string; lat?: number; lon?: number } = {}) {
+    const query = new URLSearchParams();
+    if (params.session_id) query.append('session_id', params.session_id);
+    if (params.lat !== undefined) query.append('lat', String(params.lat));
+    if (params.lon !== undefined) query.append('lon', String(params.lon));
+    const qs = query.toString();
+    return this.request(`/coach/nutrition${qs ? `?${qs}` : ''}`);
+  },
+
+  routeWeather(lat: number, lon: number) {
+    return this.request(`/coach/route-weather?lat=${lat}&lon=${lon}`);
+  },
+
+  // ---------- weather ----------
+  weather(lat: number, lon: number) {
+    return this.request(`/weather?lat=${lat}&lon=${lon}`);
+  },
+
+  raceWeather() {
+    return this.request('/race/weather');
+  },
+
+  // ---------- geo ----------
+  geoSearch(query: string) {
+    return this.request(`/geo/search?q=${encodeURIComponent(query)}`);
+  },
+
+  // ---------- health / watch ----------
+  watchWorkouts() {
+    return this.request('/health/workouts');
+  },
+
+  syncWatchWorkouts(workouts: any[]) {
+    return this.request('/health/workouts', {
+      method: 'POST',
+      body: JSON.stringify({ workouts }),
+    });
+  },
+
+  // ---------- friends ----------
+  friends() {
+    return this.request('/friends');
+  },
+
+  friendsFeed() {
+    return this.request('/friends/feed');
+  },
+
+  searchUsers(query: string) {
+    return this.request(`/users/search?q=${encodeURIComponent(query)}`);
+  },
+
+  friendRequest(userId: string) {
+    return this.request('/friends/request', {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId }),
+    });
+  },
+
+  friendRespond(friendshipId: string, accept: boolean) {
+    return this.request('/friends/respond', {
+      method: 'POST',
+      body: JSON.stringify({ friendship_id: friendshipId, accept }),
+    });
+  },
+
+  leaderboard(period: "week" | "month") {
+    return this.request(`/friends/leaderboard?period=${period}`);
+  },
+
+  // ---------- notifications ----------
+  notifications() {
+    return this.request('/notifications');
+  },
+
+  // ---------- circuits ----------
+  circuits(lat: number, lon: number, distance: number) {
+    return this.request(`/circuits?lat=${lat}&lon=${lon}&distance_km=${distance}`);
+  },
+};

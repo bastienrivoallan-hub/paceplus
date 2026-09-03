@@ -42,7 +42,6 @@
     },
     "plugins": [
       "expo-router",
-      "expo-notifications",
       [
         "@kingstinct/react-native-healthkit",
         {
